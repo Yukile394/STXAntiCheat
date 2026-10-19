@@ -1,0 +1,147 @@
+# ===================================================================
+#  STXAntiCheat – yapılandırma
+#  VARSAYILAN DAVRANIŞ: yalnızca kaydet ve staff'a bildir. Ceza KAPALI.
+#  Cezayı açmadan önce logs/ klasöründeki "WOULD_PUNISH" kayıtlarını
+#  inceleyin; hiç yanlış pozitif görmüyorsanız punishment bölümünü açın.
+# ===================================================================
+
+general:
+  debug: false
+  disabled-worlds: []            # kontrollerin kapalı olacağı dünyalar
+  bedrock-prefix: "."            # Geyser/Floodgate isim öneki ("" = kapalı)
+  bedrock-relaxed: true          # Bedrock oyuncularında Rotation/Aim/AutoClicker/Scaffold-ışın kapalı
+  bypass-permission: "stx.bypass"
+
+# Lag / bağlantı güvenliği: bu koşullarda KANIT ÜRETİLMEZ.
+safety:
+  max-ping-ms: 400
+  min-tps: 18.0
+  join-grace-ticks: 100
+  teleport-grace-ticks: 30
+  respawn-grace-ticks: 60
+  flight-toggle-grace-ticks: 80
+  gamemode-grace-ticks: 40
+  glide-end-grace-ticks: 40
+  riptide-grace-ticks: 60
+  vehicle-exit-grace-ticks: 20
+  ping-jump-ms: 120              # iki saniye arasında ping bu kadar sıçrarsa kısa süre atla
+  ping-jump-grace-ticks: 60
+
+# Şüphe puanı: her kanıt (weight x check-weight) puan ekler, zamanla azalır.
+suspicion:
+  decay-per-second: 0.15
+  alert-points-per-check: 4      # bir kontrolün puanı bunu aşınca staff'a bildir
+  alert-cooldown-seconds: 3
+
+# Staff / OP bildirimleri
+alerts:
+  notify-ops: true               # OP olan oyuncular (stx.alerts izni olmasa da) uyarı alır
+  ops-see-all-evidence: true     # OP'ler puan eşiğine bakılmadan HER kanıtı görür
+  notify-when-not-punished: true # ceza eşiği aşıldı ama oyuncu atılmadıysa (ceza kapalı) OP'lere bildir
+
+punishment:
+  enabled: false                 # 1) ceza sistemi
+  i-have-reviewed-the-logs: false # 2) ikinci emniyet: loglar incelendi mi? İkisi de true olmadan CEZA VERİLMEZ.
+  dry-run-logging: true          # ceza kapalıyken "cezalandırılacaktı" kaydı (WOULD_PUNISH) yaz
+  cooldown-seconds: 120
+  alert-total: 10
+  kick-total: 40
+  ban-total: 90
+  min-distinct-checks: 2         # ceza için birbirinden bağımsız en az kaç kontrol
+  distinct-min-points: 6         # bir kontrolün "bağımsız kanıt" sayılması için gereken puan
+  single-check-kick: 60          # tek kontrol bu puana ulaşırsa (toplam eşiğiyle birlikte) tek başına yeter
+  single-check-ban: 120
+  kick-command: "kick %player% &c[STX] Hile şüphesi tespit edildi."
+  ban-command: "ban %player% [STX] Hile kullanımı (otomatik, kanıtlı: %check%)"
+
+logging:
+  file: true                     # plugins/STXAntiCheat/logs/stx-YYYY-MM-DD.jsonl
+  console: false
+  console-min-total: 8
+  keep-days: 14
+  queue-size: 20000
+
+# Her kontrol: enabled, weight (kanıt başına puan çarpanı) + kontrol özel ayarlar.
+checks:
+  Reach:
+    enabled: true
+    weight: 1.0
+    tolerance: 0.30              # hedefin ping penceresindeki en yakın konumundan sonra eklenen pay
+    buffer: 6
+    mob-extra: 0.30
+  Aim:                           # bakış ışını hedefi ıskalıyor (rotasyonsuz Aura, HitBox)
+    enabled: true
+    weight: 1.0
+    expand: 0.15
+    buffer: 7
+  Aura:                          # çoklu hedef, snap, duvar arkası
+    enabled: true
+    weight: 1.0
+    multi-targets: 3
+    multi-ticks: 5
+    flick-degrees: 60
+    wall-check: true
+  AutoClicker:
+    enabled: true
+    weight: 1.0
+    max-cps: 22
+    sustain-seconds: 3
+    consistency-samples: 40
+    consistency-min-stddev: 0.35
+  Velocity:                      # Anti-Knockback
+    enabled: true
+    weight: 1.0
+    min-ratio: 1.2               # vanilla en kötü durumda ≈4.7 ölçüldü
+    buffer: 3
+  Fly:                           # Fly, Hover, FastFall
+    enabled: true
+    weight: 1.0
+    hover-ticks: 8
+    max-rise: 1.32
+  Step:
+    enabled: true
+    weight: 1.0
+  HighJump:
+    enabled: true
+    weight: 1.0
+  Speed:
+    enabled: true
+    weight: 1.0
+    margin: 0.10                 # vanilla (sprint+bhop) limitlerinin üstüne tolerans
+    ice-multiplier: 2.2
+  Timer:                         # Timer / TickShift / paket patlaması
+    enabled: true
+    weight: 1.0
+    max-credit-ms: 800
+    tolerance-ms: 100
+  NoFall:
+    enabled: true
+    weight: 1.0
+  NoSlow:
+    enabled: true
+    weight: 1.0
+    limit: 0.12
+  Scaffold:
+    enabled: true
+    weight: 1.0
+    rate-per-20-ticks: 14
+  Criticals:
+    enabled: true
+    weight: 1.0
+  ChestStealer:
+    enabled: true
+    weight: 1.0
+    min-open-ticks: 3
+    samples: 12
+    min-stddev: 0.3
+  GuiMove:
+    enabled: true
+    weight: 1.0
+  Rotation:                      # fare kuantizasyonu (GCD); sinematik kamera/özel istemcilerde yanlış pozitif olabilir
+    enabled: true
+    weight: 0.4
+    window: 40
+    min-step: 0.005
+  Phase:
+    enabled: true
+    weight: 0.6

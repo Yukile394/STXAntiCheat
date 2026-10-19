@@ -1,0 +1,23 @@
+name: STXAntiCheat
+version: '${version}'
+main: dev.stx.anticheat.bukkit.STXAntiCheat
+api-version: '1.21'
+description: Düşük yanlış-pozitifli, kanıt tabanlı Paper AntiCheat
+authors: [STX]
+folia-supported: false
+commands:
+  stx:
+    description: STXAntiCheat yönetim komutu
+    usage: /stx <help|alerts|status|history|exempt|reset|reload>
+    aliases: [stxac]
+    permission: stx.admin
+permissions:
+  stx.admin:
+    description: Yönetim komutları
+    default: op
+  stx.alerts:
+    description: Hile uyarılarını görür
+    default: op
+  stx.bypass:
+    description: Tüm kontrollerden muaf
+    default: false

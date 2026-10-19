@@ -1,0 +1,63 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # gradle-wrapper.jar'ı resmî Gradle sağlama toplamlarıyla doğrular (kurcalanmış jar'ı reddeder)
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      # build = derleme + jar + coreTests (80 çekirdek test)
+      - name: Build and test
+        run: ./gradlew build --stacktrace
+
+      - name: Upload plugin jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: STXAntiCheat
+          path: build/libs/STXAntiCheat-*.jar
+          if-no-files-found: error
+
+  release:
+    # v1.0.0 gibi bir etiket (tag) push'layınca jar'ı GitHub Release olarak yayınlar
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: STXAntiCheat
+          path: dist
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.jar
+          generate_release_notes: true
