@@ -20,33 +20,32 @@ git tag v1.0.0 && git push origin v1.0.0
 Windows'tan yüklerseniz `gradlew` çalıştırma biti kaybolabilir; workflow `chmod +x gradlew` ile bunu zaten düzeltir
 (yerelde için: `git update-index --chmod=+x gradlew`).
 
-## Kademeli müdahale sistemi
-Her kontrol **kendi puanını** tutar. Puan `confirm-points` altındaysa (**LOW**) yalnızca kayıt tutulur. Üstüne çıkarsa
-bir **ihlal** sayılır (aynı hile için en fazla dakikada bir; UUID bazlı, `plugins/STXAntiCheat/data/violations.dat` içinde
-kalıcı, 72 saat sonra düşer):
+## Müdahale sistemi
+**1) Anında engel (log düştüğü an):** bir kontrol kanıt kaydedince hileye özel kısa engel devreye girer (ihlal sayacından bağımsız):
+- Saldırı hileleri (Aura/Reach/Aim): vuruşlar 3 sn iptal. **Duvar arkası vuruş ve bakmadan (≥70° sapma) vuruş her seferinde anında iptal edilir.**
+- Hareket hileleri (Fly/Speed/Step/HighJump/Jesus/Spider/Phase/NoFall/NoSlow): son temiz konuma geri alma + 2 sn **yerinde dondurma**
+  (yatay hareket ve yukarı çıkış engellenir; düşüş ve bakış serbest; sıvı/lav/araç/elytra içindekiler tuzağa düşmesin diye serbest).
+- Scaffold: blok koyma, ChestStealer: sandık işlemleri iptal.
+
+**2) Kalıcı ihlal (UUID bazlı, `data/violations.dat`):** puan `confirm-points`'i aşarsa ihlal sayılır (aynı hile için en fazla 30 sn'de bir):
 
 | İhlal | Müdahale | Mesaj |
 |---|---|---|
-| 1 | geçici (varsayılan 15 sn) hileye özel engel | `§e§lAntiCheat §8» §eŞüpheli hareketlerin algılandı! 15 saniye boyunca saldırıların engellendi. §7(1/3)` |
-| 2 | daha uzun (30 sn) kısıtlama | `§e§lAntiCheat §8» §6Hile şüphesi devam ediyor! Hareketlerin kısıtlandı. §7(2/3)` |
-| 3 | **BAN** – yalnızca ban-uygun hile + HIGH kanıt + ≥2 bağımsız hile türü + kilit açıkken | `§c§lAntiCheat §8» §cBirden fazla hile ihlali tespit edildi. Sunucudan yasaklandın. §7(3/3)` |
+| 1 | 15 sn hileye özel engel | `§e§lAntiCheat §8» §eŞüpheli hareketlerin algılandı! 15 saniye boyunca saldırıların engellendi. §7(1/3)` |
+| 2 | 30 sn kısıtlama | `§e§lAntiCheat §8» §6Hile şüphesi devam ediyor! Hareketlerin kısıtlandı. §7(2/3)` |
+| 3 | **7 gün BAN** (ban-uygun hile + güçlü kanıt) | `§c§lAntiCheat §8» §cBirden fazla hile ihlali tespit edildi. Sunucudan yasaklandın. §7(3/3)` |
 
-Hileye özel müdahale (`checks.<Ad>.mitigation`): **ATTACK** (vuruşlar iptal) · **MOVE** (son temiz konuma geri alma +
-kısıt süresince doğrulanmış her yeni kanıtta tekrar geri alma) · **PLACE** (blok koyma iptal) · **CONTAINER** (sandık
-işlemleri iptal) · **NONE** (yalnızca kayıt). Reach'te ayrıca ulaşılamayan vuruş ihlal sayısından bağımsız anında iptal edilir.
-Her hile için ayrı `confirm-points`, `strong-points`, `violations-to-ban`, süreler ve `ban-eligible` ayarlanabilir.
-AutoClicker, Criticals, ChestStealer, GuiMove, Velocity, Rotation **ban-uygun değildir** (en fazla geçici kısıt).
+Ban eklentinin kendi UUID tabanlı listesindedir (sunucu ban listesine bağımlı değil, sürümden bağımsız): oyuncu giriş yapamaz,
+kalan süre gösterilir, sunucu yeniden başlasa da sürer. Kaldırmak için `/stx unban <oyuncu>`. Süre ve açma/kapama: `sanctions.ban-*`.
+AutoClicker, Criticals, ChestStealer, GuiMove, Velocity, Rotation, AimAssist **ban-uygun değildir** (en fazla geçici kısıt).
 
-Çıkıp girme: girişte tüm kontroller sıfırdan kurulur (`reinit`), ihlaller UUID'den, bitmemiş kısıtlamalar defterden
-geri yüklenir (relog ile kaçış yok). Dünya değişimi, respawn, teleport ve kendi geri-ışınlamamız için ayrı kısa tolerans vardır.
-Defter periyodik (asenkron, atomik yazım), çıkışta ve kapanışta kaydedilir.
+Çıkıp girme: girişte kontroller sıfırdan kurulur, ihlaller ve bitmemiş kısıtlar defterden geri yüklenir. Dünya değişimi,
+respawn, teleport ve kendi geri-ışınlamamız için ayrı kısa tolerans vardır. Defter periyodik (asenkron, atomik) ve kapanışta kaydedilir.
 
-## Güvenli kullanım (önerilen sıra)
-1. Varsayılan: geçici müdahaleler **açık**, kalıcı ban **kilitli** (`sanctions.ban-enabled: false`). 3/3'e ulaşan oyuncu
-   atılmaz/banlanmaz; `WOULD_BAN` olarak loglanır ve OP'lere bildirilir.
-2. `logs/stx-*.jsonl` içindeki `VIOLATION_*` ve `WOULD_BAN` kayıtlarını inceleyin. Hatalı kısıtlanan oyuncu için `/stx reset <oyuncu>`.
-3. Yanlış pozitif görmüyorsanız `sanctions.ban-enabled: true` **ve** `sanctions.i-have-reviewed-the-logs: true` yapın.
-   İkisi birden açık olmadan hiçbir ban çalışmaz. Geçici müdahaleyi kapatmak için `sanctions.mitigation-enabled: false`.
+## Aura / saldırı tespiti
+Her vuruşta: (1) hedefin ping geçmişindeki **tüm** konumlarına 5 noktalı duvar ışını, (2) bakış–hedef açısı, (3) Reach, (4) bakış ışını–hitbox,
+(5) AimAssist (nişanın hedef merkezine fazla kilitli/tutarlı olması), (6) çoklu hedef, keskin dönüş ve **sessiz rotasyon** (dön–vur–geri dön).
+Duvar ve açı kontrolleri TPS düşüşünde kapanmaz (yalnızca muafiyet ve ping > 700 ms'de atlanır).
 
 ## OP bildirimleri
 Oyuncu **atılmadığında** (ceza kapalıyken) tespitler OP'lere görünür (`alerts:` bölümü):
@@ -68,7 +67,7 @@ Oyuncu **atılmadığında** (ceza kapalıyken) tespitler OP'lere görünür (`a
 ## Hile → kontrol eşlemesi (ThunderHack + Wetsuki analizi)
 | İstemci modülü | Kontrol | Yöntem |
 |---|---|---|
-| Aura (Track/rotasyonsuz), TriggerBot, AimBot | Aim, Aura, Rotation, AutoClicker | bakış ışını–hitbox, çoklu hedef, snap, duvar, fare GCD, vuruş ritmi |
+| Aura (Track/rotasyonsuz/sessiz), TriggerBot, AimBot | Aim, Aura, AimAssist, Rotation, AutoClicker | bakış ışını–hitbox, çoklu hedef, snap, duvar, fare GCD, vuruş ritmi |
 | Reach, HitBox | Reach, Aim | göz–kutu mesafesi (ping penceresindeki hedef geçmişiyle), genişletilmiş kutu ıskalama |
 | Criticals | Criticals | vuruş öncesi zeminden mikro-zıplama (0.0625 vb.) |
 | Velocity / AntiKnockback (Wetsuki "Cancel") | Velocity | verilen hıza karşı gerçek yer değiştirme oranı |
@@ -83,6 +82,11 @@ Oyuncu **atılmadığında** (ceza kapalıyken) tespitler OP'lere görünür (`a
 | Jesus | Jesus | sıvı yüzeyinde (içinde değil) düz yatay ilerleme |
 | Spider | Spider | yukarı yönlü yerçekimi sapması + duvar yanında |
 
+## Bataklık/çamur yanlış pozitifi (düzeltildi)
+Zemin sorgusu bloğu "tam küp" sanıyordu; çamur (0.875), ruh kumu, tarla ve patika tam küp değildir, bu yüzden oyuncu
+bunların üstündeyken "havada" (Fly/Hover/NoFall) veya blok "içinde" (Phase) görünüyordu. Artık her zaman gerçek çarpışma şekli kullanılır.
+Bu düzeltme koddan türetildi; gerçek sunucuda bataklıkta doğrulayın.
+
 ## Bilinen sınırlar (dürüst liste)
 - **Paket katmanı yok.** Yalnızca Bukkit olayları kullanılır. Sonuçları:
   alt-tik tıklama zamanlaması güvenilmez (bu yüzden tik bazlı + geniş örneklem), `AirStuck`/`Blink`/`TickShift`
@@ -96,7 +100,7 @@ Oyuncu **atılmadığında** (ceza kapalıyken) tespitler OP'lere görünür (`a
 - Folia desteklenmez.
 
 ## Test durumu
-- Çekirdek mantık (`core/`): **96 otomatik test geçiyor** (ihlal defteri kalıcılığı/relog, ceza basamakları ve ban kilitleri, Jesus dahil); meşru yürüme/sprint/bunny-hop/düşme/knockback/lag
+- Çekirdek mantık (`core/`): **106 otomatik test geçiyor** (ihlal defteri kalıcılığı/relog, ceza basamakları ve ban kilitleri, Jesus dahil); meşru yürüme/sprint/bunny-hop/düşme/knockback/lag
   senaryolarında 0 kanıt, hile senaryolarında tespit.
 - Paper adaptörü (`bukkit/`): gerçek Paper API'si ile **derlenmedi ve canlı sunucuda denenmedi**
   (geliştirme ortamında API indirilemedi; yalnızca kendi stub'larımla iç tutarlılık denendi). İlk `./gradlew build`

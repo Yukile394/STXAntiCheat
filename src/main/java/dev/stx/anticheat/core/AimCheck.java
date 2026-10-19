@@ -16,6 +16,20 @@ public final class AimCheck {
         this.buf = new FlagBuffer(bufferLimit, 0.75);
     }
 
+    /** Bakış yönü ile hedef kutusu merkezi arasındaki en küçük açı (derece), tüm geçmiş konumlar içinde. */
+    public static double minAngle(double ex, double ey, double ez, float yaw, float pitch, List<Box> history) {
+        double[] d = Geometry.look(yaw, pitch);
+        double best = 180;
+        for (Box b : history) {
+            double cx = (b.minX() + b.maxX()) / 2 - ex, cy = (b.minY() + b.maxY()) / 2 - ey, cz = (b.minZ() + b.maxZ()) / 2 - ez;
+            double len = Math.sqrt(cx * cx + cy * cy + cz * cz);
+            if (len < 1e-6) return 0;
+            double dot = (cx * d[0] + cy * d[1] + cz * d[2]) / len;
+            best = Math.min(best, Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, dot)))));
+        }
+        return best;
+    }
+
     public Result onHit(double ex, double ey, double ez, float yaw, float pitch, List<Box> history, double maxDist) {
         if (history.isEmpty()) return null;
         double[] d = Geometry.look(yaw, pitch);

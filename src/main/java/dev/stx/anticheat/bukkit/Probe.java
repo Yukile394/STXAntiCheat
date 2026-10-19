@@ -39,15 +39,12 @@ final class Probe {
                     Block b = w.getBlockAt(bx, by, bz);
                     Material m = b.getType();
                     if (m.isAir() || b.isPassable()) continue;
+                    // DİKKAT: her zaman gerçek çarpışma şekli. Çamur (0.875), ruh kumu, tarla, patika tam küp DEĞİLDİR.
                     double top = Double.NEGATIVE_INFINITY;
-                    if (m.isOccluding()) {
-                        top = by + 1.0;
-                    } else {
-                        for (BoundingBox bb : b.getCollisionShape().getBoundingBoxes()) {
-                            if (bx + bb.getMaxX() <= x - HALF + EPS || bx + bb.getMinX() >= x + HALF - EPS
-                                    || bz + bb.getMaxZ() <= z - HALF + EPS || bz + bb.getMinZ() >= z + HALF - EPS) continue;
-                            top = Math.max(top, by + bb.getMaxY());
-                        }
+                    for (BoundingBox bb : b.getCollisionShape().getBoundingBoxes()) {
+                        if (bx + bb.getMaxX() <= x - HALF + EPS || bx + bb.getMinX() >= x + HALF - EPS
+                                || bz + bb.getMaxZ() <= z - HALF + EPS || bz + bb.getMinZ() >= z + HALF - EPS) continue;
+                        top = Math.max(top, by + bb.getMaxY());
                     }
                     if (top >= y - tolBelow && top <= y + 0.003) return true;
                 }
@@ -87,7 +84,6 @@ final class Probe {
                     Block b = w.getBlockAt(bx, by, bz);
                     Material m = b.getType();
                     if (m.isAir() || b.isPassable()) continue;
-                    if (m.isOccluding()) return true;
                     for (BoundingBox bb : b.getCollisionShape().getBoundingBoxes()) {
                         if (bx + bb.getMinX() < maxX && bx + bb.getMaxX() > minX
                                 && by + bb.getMinY() < maxY && by + bb.getMaxY() > minY

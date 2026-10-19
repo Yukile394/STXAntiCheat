@@ -66,9 +66,7 @@ public final class STXAntiCheat extends JavaPlugin {
 
         for (Player p : Bukkit.getOnlinePlayers()) reinit(p);    // /reload veya geç yükleme
         getLogger().info("STXAntiCheat etkin. Geçici müdahale: " + (cfg.b("sanctions.mitigation-enabled", true) ? "AÇIK" : "KAPALI")
-                + " | Kalıcı ban: " + (cfg.banActive() ? "AÇIK" : "KİLİTLİ (atma/banlama yok)"));
-        if (cfg.b("sanctions.ban-enabled", false) && !cfg.b("sanctions.i-have-reviewed-the-logs", false))
-            getLogger().warning("sanctions.ban-enabled=true ama i-have-reviewed-the-logs=false: BAN VERİLMEYECEK.");
+                + " | Ban: " + (cfg.banActive() ? "AÇIK (" + cfg.d("sanctions.ban-duration-days", 7) + " gün)" : "KAPALI"));
     }
 
     @Override
@@ -181,6 +179,6 @@ public final class STXAntiCheat extends JavaPlugin {
 
     List<String> checkNames() {
         return List.of("Reach", "Aim", "Aura", "AutoClicker", "Velocity", "Fly", "Step", "HighJump", "Speed", "Timer",
-                "NoFall", "NoSlow", "Scaffold", "Criticals", "ChestStealer", "GuiMove", "Rotation", "Phase", "Jesus", "Spider");
+                "NoFall", "NoSlow", "Scaffold", "Criticals", "ChestStealer", "GuiMove", "Rotation", "Phase", "Jesus", "Spider", "AimAssist");
     }
 }

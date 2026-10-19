@@ -25,6 +25,7 @@ public final class PlayerData {
     public ReachCheck reach;
     public AimCheck aim;
     public AuraCheck aura;
+    public AimAssistCheck aimAssist;
     public ClickCheck click;
     public RotationCheck rotation;
     public ScaffoldCheck scaffold;
@@ -46,7 +47,7 @@ public final class PlayerData {
     public double lastX, lastY, lastZ, lastHSpeed;
     public float lastYaw, lastPitch;
     public boolean lastStanding = true;
-    private double yawAbs1, yawAbs2;
+    private double yaw1, yaw2;          // işaretli son iki yaw farkı
 
     public final Map<String, Long> lastAlertMs = new HashMap<>();
 
@@ -89,6 +90,7 @@ public final class PlayerData {
         reach = new ReachCheck(c.cd("Reach", "tolerance", 0.30), c.cd("Reach", "buffer", 6));
         aim = new AimCheck(c.cd("Aim", "expand", 0.15), c.cd("Aim", "buffer", 7));
         aura = new AuraCheck(c.ci("Aura", "multi-targets", 3), c.ci("Aura", "multi-ticks", 5), c.cd("Aura", "flick-degrees", 60));
+        aimAssist = new AimAssistCheck(c.ci("AimAssist", "samples", 25), c.cd("AimAssist", "max-mean", 1.2), c.cd("AimAssist", "max-stddev", 0.7));
         click = new ClickCheck(c.ci("AutoClicker", "max-cps", 22), c.ci("AutoClicker", "sustain-seconds", 3),
                 c.ci("AutoClicker", "consistency-samples", 40), c.cd("AutoClicker", "consistency-min-stddev", 0.35));
         rotation = new RotationCheck(c.ci("Rotation", "window", 40), c.cd("Rotation", "min-step", 0.005));
@@ -103,8 +105,10 @@ public final class PlayerData {
 
     public boolean inCombat(long tick) { return tick - lastAttackTick < 100; }
 
-    public void pushYawDelta(double absYaw) { yawAbs2 = yawAbs1; yawAbs1 = absYaw; }
-    public double recentYawDelta() { return Math.max(yawAbs1, yawAbs2); }
+    public void pushYawDelta(double signedYaw) { yaw2 = yaw1; yaw1 = signedYaw; }
+    public double recentYawDelta() { return Math.max(Math.abs(yaw1), Math.abs(yaw2)); }
+    /** Sessiz rotasyon: hedefe hızla dön, vur, geri dön (iki ardışık büyük zıt yönlü dönüş). */
+    public boolean snapBack() { return yaw1 * yaw2 < 0 && Math.min(Math.abs(yaw1), Math.abs(yaw2)) > 35; }
 
     public void pushPos(long ms, double x, double y, double z) {
         hT[hHead] = ms; hX[hHead] = x; hY[hHead] = y; hZ[hHead] = z;

@@ -45,7 +45,7 @@ final class StxCommand implements CommandExecutor, TabCompleter {
                 }
                 msg(s, vs.length() == 0 ? "Kalıcı ihlal yok." : "İhlaller: &e" + vs);
                 msg(s, "Aktif müdahale: &e" + (d.mitUntil.entrySet().stream().filter(x -> x.getValue() > now).map(x -> x.getKey() + " " + (x.getValue() - now) / 1000 + "sn").toList())
-                        + " &7| Ban: " + (plugin.cfg().banActive() ? "&cAÇIK" : "&aKİLİTLİ"));
+                        + " &7| Ban sistemi: " + (plugin.cfg().banActive() ? "&cAÇIK" : "&aKAPALI"));
             }
             case "history" -> msg(s, "Kayıtlar: plugins/STXAntiCheat/logs/stx-<tarih>.jsonl (alanlar: check, detail, ping, tps, history)");
             case "exempt" -> {
@@ -70,12 +70,22 @@ final class StxCommand implements CommandExecutor, TabCompleter {
                 d.build(plugin.cfg());
                 msg(s, t.getName() + " için puanlar, kalıcı ihlaller ve kısıtlamalar sıfırlandı (yanlış pozitif düzeltme).");
             }
+            case "unban" -> {
+                if (a.length < 2) { msg(s, "/stx unban <oyuncu>"); return true; }
+                java.util.UUID id = plugin.ledger().uuidByName(a[1]);
+                if (id == null) { msg(s, "Bu isimde kayıtlı oyuncu yok."); return true; }
+                plugin.ledger().unban(id);
+                plugin.ledger().clear(id);
+                plugin.markDirty();
+                msg(s, a[1] + " banı kaldırıldı ve ihlalleri sıfırlandı.");
+            }
             case "reload" -> { plugin.reloadAll(); msg(s, "Yapılandırma yeniden yüklendi."); }
             default -> {
                 msg(s, "&f/stx alerts &7- uyarıları aç/kapat");
                 msg(s, "&f/stx status [oyuncu] &7- şüphe puanları");
                 msg(s, "&f/stx exempt <oyuncu> [dk] &7- geçici muafiyet");
                 msg(s, "&f/stx reset <oyuncu> &7- puanları sıfırla");
+                msg(s, "&f/stx unban <oyuncu> &7- banı kaldır");
                 msg(s, "&f/stx reload &7- config yenile   &f/stx history &7- log konumu");
             }
         }
@@ -86,7 +96,7 @@ final class StxCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender s, Command c, String l, String[] a) {
         List<String> out = new ArrayList<>();
         if (a.length == 1) {
-            for (String x : List.of("alerts", "status", "history", "exempt", "reset", "reload"))
+            for (String x : List.of("alerts", "status", "history", "exempt", "reset", "unban", "reload"))
                 if (x.startsWith(a[0].toLowerCase(Locale.ROOT))) out.add(x);
         } else if (a.length == 2 && List.of("status", "exempt", "reset").contains(a[0].toLowerCase(Locale.ROOT))) {
             for (Player p : Bukkit.getOnlinePlayers())

@@ -22,6 +22,27 @@ final class MovementListener implements Listener {
         return true;
     }
 
+    /**
+     * Hareket kısıtı aktifken (log sonrası anında dondurma veya ihlal kısıtı): yerinden oynayamaz, yukarı çıkamaz.
+     * Yalnızca düşüşe ve bakış yönünü çevirmeye izin verilir. Sıvı/lav içindekiler tuzağa düşmesin diye serbesttir.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onFreeze(PlayerMoveEvent e) {
+        Player p = e.getPlayer();
+        PlayerData d = plugin.peek(p.getUniqueId());
+        if (d == null || !d.mitActive("MOVE", System.currentTimeMillis())) return;
+        if (p.isInLava() || p.isInWater() || p.isInsideVehicle() || p.isGliding()) return;
+        Location f = e.getFrom(), t = e.getTo();
+        if (t == null) return;
+        double dx = t.getX() - f.getX(), dy = t.getY() - f.getY(), dz = t.getZ() - f.getZ();
+        if (dx * dx + dz * dz > 1.0E-6 || dy > 0.001) {
+            Location n = f.clone();
+            n.setYaw(t.getYaw());
+            n.setPitch(t.getPitch());
+            e.setTo(n);
+        }
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMove(PlayerMoveEvent e) {
         Player p = e.getPlayer();
@@ -52,7 +73,7 @@ final class MovementListener implements Listener {
         float yaw = to.getYaw(), pitch = to.getPitch();
         double dYaw = Geometry.wrapDegrees(yaw - d.lastYaw);
         double dPitch = pitch - d.lastPitch;
-        d.pushYawDelta(Math.abs(dYaw));
+        d.pushYawDelta(dYaw);
         d.lastYaw = yaw; d.lastPitch = pitch;
 
         if (dx * dx + dy * dy + dz * dz > 100.0) d.grace(tick + cfg.i("safety.teleport-grace-ticks", 30));

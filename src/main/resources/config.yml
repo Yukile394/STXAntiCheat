@@ -1,8 +1,8 @@
 # ===================================================================
 #  STXAntiCheat – yapılandırma
-#  VARSAYILAN DAVRANIŞ: yalnızca kaydet ve staff'a bildir. Ceza KAPALI.
-#  Cezayı açmadan önce logs/ klasöründeki "WOULD_PUNISH" kayıtlarını
-#  inceleyin; hiç yanlış pozitif görmüyorsanız punishment bölümünü açın.
+#  Akış: kanıt -> log + (anında kısa engel) -> ihlal (1/3, 2/3) -> 3/3'te süreli ban.
+#  Yanlış pozitif görürseniz: /stx reset <oyuncu> ve ilgili kontrolün weight/eşiğini düşürün
+#  veya checks.<Ad>.enabled: false yapın. Banı tamamen kapatmak için sanctions.ban-enabled: false.
 # ===================================================================
 
 general:
@@ -46,19 +46,25 @@ alerts:
 #   2. ihlal -> daha uzun kısıtlama                                      (2/3)
 #   3. ihlal -> BAN, ama yalnızca: ban-uygun hile + HIGH kanıt + en az N bağımsız hile türü + ban kilidi açık (3/3)
 sanctions:
-  mitigation-enabled: true       # geçici, kendiliğinden biten müdahaleler (güvenli)
-  ban-enabled: false             # KALICI BAN KİLİDİ. Kapalıyken kimse atılmaz/banlanmaz; WOULD_BAN olarak loglanır.
-  i-have-reviewed-the-logs: false # ikinci emniyet: loglar incelendi mi? İkisi de true olmadan BAN YOK.
-  min-distinct-checks-for-ban: 2
+  mitigation-enabled: true       # geçici, kendiliğinden biten müdahaleler
+  ban-enabled: true              # 3/3'te süreli ban (kapatmak için false)
+  ban-duration-days: 7           # ban süresi (gün). UUID bazlı, sunucu yeniden başlasa da sürer.
+  min-distinct-checks-for-ban: 1 # ban için kaç farklı hile türünde ihlal gerekir (1 = tek hile türü yeter)
   save-interval-seconds: 300
-  ban-command: "ban %player% %reason%"
+  # Log düştüğü ANDA devreye giren kısa engeller (ihlal sayacından bağımsız):
+  #   saldırı/blok/konteyner hileleri: işlem iptal edilir | hareket hileleri: geri alma + yerinde dondurma
+  instant:
+    enabled: true
+    min-points: 2                # kontrolün puanı bu değere ulaşınca (en az 2 kanıt) devreye girer
+    block-seconds: 3             # saldırı / blok koyma / konteyner engeli süresi
+    move-freeze-seconds: 2       # hareket dondurma süresi (yerinden oynayamaz, yukarı çıkamaz)
   default:
     confirm-points: 6            # ihlal sayılması için kontrol puanı (MEDIUM)
     strong-points: 14            # güçlü kanıt (HIGH) – ban için gerekli
     violations-to-restrict: 2
     violations-to-ban: 3
-    expire-hours: 72             # ihlaller bu süre sonunda sayılmaz (yanlış pozitif birikmesin)
-    violation-cooldown-seconds: 60
+    expire-hours: 72             # ihlaller bu süre sonunda sayılmaz
+    violation-cooldown-seconds: 30
     mitigation-seconds: 15
     restrict-seconds: 30
 
@@ -80,6 +86,7 @@ checks:
     cancel-margin: 0.50          # bu kadar açık aşımda vuruş anında iptal edilir
     mitigation: ATTACK
     ban-eligible: true
+    instant: true
   Aim:                           # bakış ışını hedefi ıskalıyor (rotasyonsuz Aura, HitBox)
     enabled: true
     weight: 1.0
@@ -87,15 +94,18 @@ checks:
     buffer: 7
     mitigation: ATTACK
     ban-eligible: true
+    instant: true
   Aura:                          # çoklu hedef, snap, duvar arkası
     enabled: true
     weight: 1.0
     multi-targets: 3
     multi-ticks: 5
     flick-degrees: 60
-    wall-check: true
+    wall-check: true             # HER vuruşta duvar kontrolü; kapalıysa vuruş anında iptal edilir
+    angle-cancel-degrees: 70     # bakış hedeften bu kadar saparsa vuruş anında iptal
     mitigation: ATTACK
     ban-eligible: true
+    instant: true
   AutoClicker:
     enabled: true
     weight: 1.0
@@ -105,6 +115,7 @@ checks:
     consistency-min-stddev: 0.35
     mitigation: ATTACK
     ban-eligible: false
+    instant: false
   Velocity:                      # Anti-Knockback
     enabled: true
     weight: 1.0
@@ -112,6 +123,7 @@ checks:
     buffer: 3
     mitigation: NONE
     ban-eligible: false
+    instant: false
   Fly:                           # Fly, Hover, FastFall
     enabled: true
     weight: 1.0
@@ -119,16 +131,19 @@ checks:
     max-rise: 1.32
     mitigation: MOVE
     ban-eligible: true
+    instant: true
   Step:
     enabled: true
     weight: 1.0
     mitigation: MOVE
     ban-eligible: true
+    instant: true
   HighJump:
     enabled: true
     weight: 1.0
     mitigation: MOVE
     ban-eligible: true
+    instant: true
   Speed:
     enabled: true
     weight: 1.0
@@ -136,6 +151,7 @@ checks:
     ice-multiplier: 2.2
     mitigation: MOVE
     ban-eligible: true
+    instant: true
   Timer:                         # Timer / TickShift / paket patlaması
     enabled: true
     weight: 1.0
@@ -143,28 +159,33 @@ checks:
     tolerance-ms: 100
     mitigation: MOVE
     ban-eligible: true
+    instant: false
   NoFall:
     enabled: true
     weight: 1.0
     mitigation: MOVE
     ban-eligible: true
+    instant: true
   NoSlow:
     enabled: true
     weight: 1.0
     limit: 0.12
     mitigation: MOVE
     ban-eligible: true
+    instant: true
   Scaffold:
     enabled: true
     weight: 1.0
     rate-per-20-ticks: 14
     mitigation: PLACE
     ban-eligible: true
+    instant: true
   Criticals:
     enabled: true
     weight: 1.0
     mitigation: ATTACK
     ban-eligible: false
+    instant: false
   ChestStealer:
     enabled: true
     weight: 1.0
@@ -173,11 +194,13 @@ checks:
     min-stddev: 0.3
     mitigation: CONTAINER
     ban-eligible: false
+    instant: false
   GuiMove:
     enabled: true
     weight: 1.0
     mitigation: MOVE
     ban-eligible: false
+    instant: false
   Rotation:                      # fare kuantizasyonu (GCD); sinematik kamera/özel istemcilerde yanlış pozitif olabilir
     enabled: true
     weight: 0.4
@@ -185,19 +208,32 @@ checks:
     min-step: 0.005
     mitigation: NONE
     ban-eligible: false
+    instant: false
   Phase:
     enabled: true
     weight: 0.6
     mitigation: MOVE
     ban-eligible: true
+    instant: true
   Jesus:                         # sıvı yüzeyinde yürüme
     enabled: true
     weight: 1.0
     ticks: 12
     mitigation: MOVE
     ban-eligible: true
+    instant: true
   Spider:                        # duvara tırmanma (Fly sapması duvar yanındaysa)
     enabled: true
     weight: 1.0
     mitigation: MOVE
     ban-eligible: true
+    instant: true
+  AimAssist:                     # nişan her vuruşta hedef merkezine fazla kilitli
+    enabled: true
+    weight: 0.7
+    samples: 25
+    max-mean: 1.2
+    max-stddev: 0.7
+    mitigation: ATTACK
+    ban-eligible: false
+    instant: false

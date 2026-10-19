@@ -24,6 +24,8 @@ public final class ViolationLedger {
         String name = "?";
         final Map<String, List<Long>> violations = new HashMap<>();
         final Map<String, Long> mitigations = new HashMap<>();
+        long banUntil;
+        String banReason = "";
     }
 
     private final Map<UUID, Rec> map = new HashMap<>();
@@ -85,6 +87,37 @@ public final class ViolationLedger {
 
     public synchronized void clear(UUID id) { map.remove(id); }
 
+    // ---------------- geçici (süreli) ban: sunucu ban listesinden bağımsız, sürüm-bağımsız ----------------
+    public synchronized void setBan(UUID id, String name, long untilMs, String reason) {
+        Rec r = rec(id);
+        r.name = name;
+        r.banUntil = untilMs;
+        r.banReason = reason == null ? "" : reason;
+    }
+
+    /** Aktif ban bitiş zamanı; ban yoksa/bittiyse 0. */
+    public synchronized long banUntil(UUID id, long nowMs) {
+        Rec r = map.get(id);
+        return (r == null || r.banUntil <= nowMs) ? 0 : r.banUntil;
+    }
+
+    public synchronized String banReason(UUID id) {
+        Rec r = map.get(id);
+        return r == null ? "" : r.banReason;
+    }
+
+    public synchronized void unban(UUID id) {
+        Rec r = map.get(id);
+        if (r != null) { r.banUntil = 0; r.banReason = ""; }
+    }
+
+    /** İsimden UUID (büyük/küçük harf duyarsız); bulunamazsa null. */
+    public synchronized UUID uuidByName(String name) {
+        for (Map.Entry<UUID, Rec> e : map.entrySet())
+            if (e.getValue().name.equalsIgnoreCase(name)) return e.getKey();
+        return null;
+    }
+
     // ---------------- kalıcılık ----------------
     private static String clean(String s) { return s.replace('|', '_').replace('\n', ' ').replace('\r', ' '); }
 
@@ -99,6 +132,9 @@ public final class ViolationLedger {
                 for (int i = 0; i < v.getValue().size(); i++) { if (i > 0) sb.append(','); sb.append(v.getValue().get(i)); }
                 sb.append('\n');
             }
+            if (r.banUntil > nowMs)
+                sb.append("B|").append(e.getKey()).append('|').append(clean(r.name)).append('|').append(r.banUntil)
+                        .append('|').append(clean(r.banReason)).append('\n');
             for (Map.Entry<String, Long> m : r.mitigations.entrySet()) {
                 if (m.getValue() > nowMs)
                     sb.append("M|").append(e.getKey()).append('|').append(clean(m.getKey())).append('|').append(m.getValue()).append('\n');
@@ -120,6 +156,10 @@ public final class ViolationLedger {
                     r.name = p[2];
                     List<Long> l = r.violations.computeIfAbsent(p[3], k -> new ArrayList<>());
                     for (String t : p[4].split(",")) if (!t.isBlank()) l.add(Long.parseLong(t.trim()));
+                } else if (p[0].equals("B")) {
+                    r.name = p[2];
+                    r.banUntil = Long.parseLong(p[3].trim());
+                    r.banReason = p.length > 4 ? p[4] : "";
                 } else if (p[0].equals("M")) {
                     r.mitigations.put(p[2], Long.parseLong(p[3].trim()));
                 } else bad++;

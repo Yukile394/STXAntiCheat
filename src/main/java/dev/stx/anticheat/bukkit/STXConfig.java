@@ -42,8 +42,5 @@ public final class STXConfig {
         return c.getString("checks." + check + ".mitigation", "NONE").toUpperCase(java.util.Locale.ROOT);
     }
 
-    /** Kalıcı ban ancak iki ayrı emniyet de açıksa verilir. */
-    public boolean banActive() {
-        return b("sanctions.ban-enabled", false) && b("sanctions.i-have-reviewed-the-logs", false);
-    }
+    public boolean banActive() { return b("sanctions.ban-enabled", true); }
 }

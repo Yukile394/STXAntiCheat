@@ -33,7 +33,8 @@ final class Flagger {
 
         record("EVIDENCE", p, d, check, "[" + lvl + "] " + r.detail(), w, pts, total, now);
         alert(p, d, check, r.detail(), pts, now);
-        if (lvl == SanctionPolicy.Level.LOW) return;          // düşük güven: yalnızca kayıt
+        instant(p, d, check, pts, now);                        // log düştüğü anda hileye özel anında engel
+        if (lvl == SanctionPolicy.Level.LOW) return;          // düşük güven: ihlal sayılmaz (yalnızca kayıt + kısa engel)
 
         // Aktif hareket kısıtı varken doğrulanmış yeni kanıt -> anında geri alma (ihlal sayısı artmaz)
         if (c.b("sanctions.mitigation-enabled", true) && c.mitigationType(check).equals("MOVE") && d.mitActive("MOVE", now))
@@ -48,6 +49,27 @@ final class Flagger {
         plugin.markDirty();
         record("VIOLATION_" + st, p, d, check, "n=" + n + " bağımsız=" + distinct + " seviye=" + lvl + " | " + r.detail(), w, pts, total, now);
         plugin.sanctions().execute(p, d, check, st, n, rule, now);
+    }
+
+    /**
+     * Kanıt kaydedildiği anda kısa süreli, kendiliğinden biten engel: saldırı/blok/konteyner iptali veya
+     * hareket dondurma + son temiz konuma geri alma. İhlal sayısını ARTIRMAZ (3/3 sayacından bağımsız).
+     */
+    private void instant(Player p, PlayerData d, String check, double pts, long now) {
+        STXConfig c = plugin.cfg();
+        if (!c.b("sanctions.mitigation-enabled", true) || !c.b("sanctions.instant.enabled", true)) return;
+        if (!c.cb(check, "instant", false)) return;
+        if (pts < c.d("sanctions.instant.min-points", 2)) return;
+        String type = c.mitigationType(check);
+        switch (type) {
+            case "ATTACK", "PLACE", "CONTAINER" ->
+                    d.mitUntil.merge(type, now + (long) (c.d("sanctions.instant.block-seconds", 3) * 1000), Math::max);
+            case "MOVE" -> {
+                d.mitUntil.merge("MOVE", now + (long) (c.d("sanctions.instant.move-freeze-seconds", 2) * 1000), Math::max);
+                plugin.sanctions().setback(p, d);
+            }
+            default -> { }
+        }
     }
 
     void recordEvent(String type, Player p, PlayerData d, String check, String detail, long now) {

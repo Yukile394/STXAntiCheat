@@ -53,16 +53,15 @@ final class Sanctions {
             }
             case BAN -> {
                 if (c.banActive()) {
-                    String reason = "§c§lAntiCheat §8» §cBirden fazla hile ihlali tespit edildi. Sunucudan yasaklandın. "
-                            + "§7(" + rule.violationsToBan() + "/" + rule.violationsToBan() + ")";
-                    plugin.flagger().recordEvent("BAN", p, d, check, "n=" + n, nowWall);
-                    String cmd = c.s("sanctions.ban-command", "ban %player% %reason%")
-                            .replace("%player%", p.getName()).replace("%check%", check).replace("%reason%", reason);
-                    if (cmd.startsWith("/")) cmd = cmd.substring(1);
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+                    long until = nowWall + (long) (c.d("sanctions.ban-duration-days", 7) * 86_400_000L);
+                    plugin.ledger().setBan(p.getUniqueId(), p.getName(), until, check);
+                    plugin.saveLedger(false);
+                    plugin.flagger().recordEvent("BAN", p, d, check, "n=" + n + " until=" + until, nowWall);
                     d.suspicion.clear();
+                    String counter3 = "§7(" + rule.violationsToBan() + "/" + rule.violationsToBan() + ")";
+                    p.kick(SEC.deserialize("§c§lAntiCheat §8» §cBirden fazla hile ihlali tespit edildi. Sunucudan yasaklandın. "
+                            + counter3 + "\n" + remaining(until, nowWall)));
                 } else {
-                    // Ban kilitli: oyuncu ATILMAZ; yalnızca kısıtlanır ve yetkililere bildirilir.
                     plugin.flagger().recordEvent("WOULD_BAN", p, d, check, "n=" + n, nowWall);
                     if (canMitigate) {
                         start(p, d, type, rule.restrictSeconds(), nowWall);
@@ -74,11 +73,21 @@ final class Sanctions {
         }
     }
 
+    /** Giriş engeli ve kick mesajı için kalan süre. */
+    static String remaining(long untilMs, long nowMs) {
+        long m = Math.max(0, (untilMs - nowMs) / 60_000L);
+        return "§7Kalan süre: §f" + (m / 1440) + " gün " + ((m % 1440) / 60) + " saat " + (m % 60) + " dk";
+    }
+
+    static String banScreen(long untilMs, long nowMs) {
+        return "§c§lAntiCheat §8» §cHile kullanımı nedeniyle sunucudan yasaklandın.\n" + remaining(untilMs, nowMs);
+    }
+
     private void notifyWouldBan(Player p, PlayerData d, String check, int n, long now) {
         STXConfig c = plugin.cfg();
         if (!c.b("alerts.notify-when-not-punished", true)) return;
         Component msg = SEC.deserialize(String.format(Locale.ROOT,
-                "§8[§bSTX§8] §e⚠ §f%s §7için ban koşulları oluştu (§c%s§7, %d. ihlal) ama ban KİLİTLİ olduğu için §aatılmadı§7. §8/stx status %s",
+                "§8[§bSTX§8] §e⚠ §f%s §7için ban koşulları oluştu (§c%s§7, %d. ihlal) ama ban KAPALI olduğu için §aatılmadı§7. §8/stx status %s",
                 p.getName(), check, n, p.getName()));
         for (Player s : Bukkit.getOnlinePlayers()) {
             if (!plugin.alertsEnabled(s.getUniqueId())) continue;

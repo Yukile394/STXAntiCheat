@@ -5,6 +5,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityToggleGlideEvent;
+import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerBedLeaveEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerGameModeChangeEvent;
@@ -28,6 +29,14 @@ final class StateListener implements Listener {
     private void grace(Player p, String key, int def) {
         PlayerData d = plugin.data(p);
         d.grace(plugin.tick() + plugin.cfg().i(key, def));
+    }
+
+    /** Süreli (7 gün) ban: sunucu yeniden başlasa da, isim değişse de UUID ile engeller. */
+    @EventHandler(priority = EventPriority.HIGH)
+    public void onPreLogin(AsyncPlayerPreLoginEvent e) {
+        long now = System.currentTimeMillis();
+        long until = plugin.ledger().banUntil(e.getUniqueId(), now);
+        if (until > 0) e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, Sanctions.banScreen(until, now));
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

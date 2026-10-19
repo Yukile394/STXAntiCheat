@@ -1,5 +1,6 @@
 package dev.stx.anticheat.bukkit;
 
+import dev.stx.anticheat.core.AimCheck;
 import dev.stx.anticheat.core.Geometry.Box;
 import dev.stx.anticheat.core.ReachCheck;
 import dev.stx.anticheat.core.Result;
@@ -32,12 +33,16 @@ final class CombatListener implements Listener {
         return d.bedrock && plugin.cfg().b("general.bedrock-relaxed", true);
     }
 
+    /** İstatistiksel kontroller (CPS, Reach tamponu...) için: lag/TPS düşüşünde atla. */
     private boolean skip(Player p, PlayerData d) {
-        String r = plugin.exemptReason(p, d);
-        return r != null || plugin.lagging(p, d);
+        return plugin.exemptReason(p, d) != null || plugin.lagging(p, d);
     }
 
-    /** Tıklama sayacı (hava): blok kırarken tetiklenmez. */
+    /** Geometrik kontroller (duvar, bakış açısı) için: yalnızca muafiyet ve aşırı ping. TPS düşüşü bunları kapatmaz. */
+    private boolean skipGeometry(Player p, PlayerData d) {
+        return plugin.exemptReason(p, d) != null || p.getPing() > 700;
+    }
+
     @EventHandler(priority = EventPriority.MONITOR)
     public void onClickAir(PlayerInteractEvent e) {
         if (e.getAction() != Action.LEFT_CLICK_AIR) return;
@@ -48,12 +53,12 @@ final class CombatListener implements Listener {
         if (r != null) plugin.flagger().flag(p, d, "AutoClicker", r);
     }
 
-    /** Varlığa saldırı girişimi (hasarsız olanlar dahil): CPS + vuruş aralığı + Criticals deseni. */
+    /** Saldırı girişimi: geçici saldırı engeli, CPS, vuruş aralığı, Criticals deseni. */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onAttackAttempt(PrePlayerAttackEntityEvent e) {
         Player p = e.getPlayer();
         PlayerData d = plugin.data(p);
-        if (d.mitActive("ATTACK", System.currentTimeMillis())) { e.setCancelled(true); return; }   // geçici saldırı engeli
+        if (d.mitActive("ATTACK", System.currentTimeMillis())) { e.setCancelled(true); return; }
         long tick = plugin.tick();
         d.lastAttackTick = tick;
         if (d.bypass || skip(p, d)) return;
@@ -71,44 +76,74 @@ final class CombatListener implements Listener {
         }
     }
 
-    /** Doğrulanmış vuruş: Reach, Aim (bakış ışını), Aura (çoklu hedef/snap/duvar). */
+    /**
+     * Doğrulanmış her vuruş: duvar arkası, bakmadan vuruş, Reach, Aim, Aura, AimAssist.
+     * Açıkça geçersiz vuruşlar (duvar/arkaya bakma/ulaşılamayan) ANINDA iptal edilir; ihlal sayısından bağımsızdır.
+     */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onHit(EntityDamageByEntityEvent e) {
         if (!(e.getDamager() instanceof Player p)) return;
         PlayerData d = plugin.data(p);
-        if (d.mitActive("ATTACK", System.currentTimeMillis())) { e.setCancelled(true); return; }  // geçici saldırı engeli
-        if (e.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;     // süpürme/projektil hariç
-        if (d.bypass || skip(p, d)) return;
-        STXConfig cfg = plugin.cfg();
+        if (d.mitActive("ATTACK", System.currentTimeMillis())) { e.setCancelled(true); return; }
+        if (e.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;
+        if (d.bypass || plugin.exemptReason(p, d) != null) return;
         Entity target = e.getEntity();
         if (target == p) return;
 
+        STXConfig cfg = plugin.cfg();
+        boolean cancelOk = cfg.b("sanctions.mitigation-enabled", true);
+        boolean geo = !skipGeometry(p, d);
+        boolean stat = !plugin.lagging(p, d);
         long tick = plugin.tick(), nowMs = STXAntiCheat.nowMs();
         Location eye = p.getEyeLocation();
         List<Box> boxes = boxesFor(target, p, nowMs);
-        double reach = Probe.entityReach(p);
-        boolean isPlayer = target instanceof Player;
-        double allowed = reach + (isPlayer ? 0 : cfg.cd("Reach", "mob-extra", 0.30));
 
-        Result r = d.reach.onHit(eye.getX(), eye.getY(), eye.getZ(), boxes, allowed);
-        if (r != null) plugin.flagger().flag(p, d, "Reach", r);
-        // Anlık engel: ping penceresindeki en yakın konuma bile açıkça ulaşılamıyorsa bu vuruşu iptal et (ihlal sayısından bağımsız)
-        if (cfg.enabled("Reach") && cfg.b("sanctions.mitigation-enabled", true)
+        // 1) DUVAR ARKASI: her vuruşta, hedefin TÜM ping-geçmişi konumları için ışın atılır. Hepsi kapalıysa iptal.
+        if (geo && cfg.enabled("Aura") && cfg.cb("Aura", "wall-check", true) && behindWall(p, eye, boxes)) {
+            plugin.flagger().flag(p, d, "Aura", Result.of(2.0, "Aura duvar: hedef bloğun arkasında, vuruş iptal edildi"));
+            if (cancelOk) { e.setCancelled(true); return; }
+        }
+
+        // 2) BAKMADAN VURUŞ: bakış, hedefin hiçbir geçmiş konumuna makul açıda değil -> anında iptal
+        double angle = AimCheck.minAngle(eye.getX(), eye.getY(), eye.getZ(), eye.getYaw(), eye.getPitch(), boxes);
+        double cancelAngle = cfg.cd("Aura", "angle-cancel-degrees", 70);
+        if (geo && !relaxed(d) && cfg.enabled("Aura") && angle > cancelAngle) {
+            plugin.flagger().flag(p, d, "Aura", Result.of(2.0, String.format(java.util.Locale.ROOT,
+                    "Aura bakmadan vuruş: bakış hedeften %.0f° sapmış, vuruş iptal edildi", angle)));
+            if (cancelOk) { e.setCancelled(true); return; }
+        }
+
+        // 3) REACH
+        double allowed = Probe.entityReach(p) + (target instanceof Player ? 0 : cfg.cd("Reach", "mob-extra", 0.30));
+        if (stat) {
+            Result r = d.reach.onHit(eye.getX(), eye.getY(), eye.getZ(), boxes, allowed);
+            if (r != null) plugin.flagger().flag(p, d, "Reach", r);
+        }
+        if (stat && cfg.enabled("Reach") && cancelOk
                 && ReachCheck.minDistance(eye.getX(), eye.getY(), eye.getZ(), boxes)
                 > allowed + cfg.cd("Reach", "tolerance", 0.30) + cfg.cd("Reach", "cancel-margin", 0.50)) {
             e.setCancelled(true);
             return;
         }
 
-        if (!relaxed(d)) {
-            r = d.aim.onHit(eye.getX(), eye.getY(), eye.getZ(), eye.getYaw(), eye.getPitch(), boxes, allowed);
+        // 4) AIM (ışın hitbox'ı ıskalıyor) ve AimAssist (merkeze fazla kilitli)
+        if (stat && !relaxed(d)) {
+            Result r = d.aim.onHit(eye.getX(), eye.getY(), eye.getZ(), eye.getYaw(), eye.getPitch(), boxes, allowed);
             if (r != null) plugin.flagger().flag(p, d, "Aim", r);
+            Box cur = boxes.get(0);
+            double cdx = (cur.minX() + cur.maxX()) / 2 - eye.getX(), cdz = (cur.minZ() + cur.maxZ()) / 2 - eye.getZ();
+            if (Math.hypot(cdx, cdz) >= 2.0) {                       // çok yakın mesafede açı ölçümü anlamsız
+                r = d.aimAssist.onHit(angle);
+                if (r != null) plugin.flagger().flag(p, d, "AimAssist", r);
+            }
         }
 
-        r = d.aura.onHit(tick, target.getEntityId(), d.recentYawDelta());
-        if (r != null) plugin.flagger().flag(p, d, "Aura", r);
-
-        if (cfg.cb("Aura", "wall-check", true)) wallCheck(p, d, eye, target);
+        // 5) AURA davranışı: çoklu hedef + keskin dönüş + sessiz rotasyon (dön-vur-geri dön)
+        if (geo) {
+            double yawD = d.snapBack() ? Math.max(d.recentYawDelta(), 90) : d.recentYawDelta();
+            Result r = d.aura.onHit(tick, target.getEntityId(), yawD);
+            if (r != null) plugin.flagger().flag(p, d, "Aura", r);
+        }
     }
 
     private List<Box> boxesFor(Entity t, Player attacker, long nowMs) {
@@ -128,34 +163,42 @@ final class CombatListener implements Listener {
         return list;
     }
 
-    /** Hedefin 3 noktasının HEPSİ blokla kapalıysa duvar arkasından vuruş. */
-    private void wallCheck(Player p, PlayerData d, Location eye, Entity target) {
-        Location tl = target.getLocation();
-        double h = target.getHeight();
-        double[] ys = {h * 0.5, h * 0.9, 0.2};
-        boolean allBlocked = true;
-        for (double yo : ys) {
-            Vector dir = new Vector(tl.getX() - eye.getX(), tl.getY() + yo - eye.getY(), tl.getZ() - eye.getZ());
-            double dist = dir.length();
-            if (dist < 0.8) { allBlocked = false; break; }
-            dir.normalize();
-            RayTraceResult rr = p.getWorld().rayTraceBlocks(eye, dir, dist - 0.1, FluidCollisionMode.NEVER, true);
-            if (rr == null) { allBlocked = false; break; }
+    /** Göz -> hedef arasında blok var mı? Konumların HEPSİNDE ve 5 noktanın HEPSİNDE kapalıysa duvar arkasıdır. */
+    private boolean behindWall(Player p, Location eye, List<Box> boxes) {
+        int n = boxes.size();
+        int[] idx = n <= 4 ? null : new int[]{0, n / 3, (2 * n) / 3, n - 1};
+        int count = idx == null ? n : idx.length;
+        for (int k = 0; k < count; k++) {
+            Box b = boxes.get(idx == null ? k : idx[k]);
+            if (visible(p, eye, b)) return false;
         }
-        if (allBlocked) {
-            if (d.wallBuf.fail(1))
-                plugin.flagger().flag(p, d, "Aura", Result.of(1.0, "Aura duvar: hedefin 3 noktası da blokla kapalı"));
-        } else d.wallBuf.pass();
+        return true;
     }
 
-    /** Geçici blok yerleştirme engeli (Scaffold müdahalesi). */
+    private boolean visible(Player p, Location eye, Box b) {
+        double cx = (b.minX() + b.maxX()) / 2, cz = (b.minZ() + b.maxZ()) / 2, h = b.maxY() - b.minY();
+        double dxs = cx - eye.getX(), dzs = cz - eye.getZ(), len = Math.hypot(dxs, dzs);
+        double px = len > 1e-6 ? -dzs / len * 0.3 : 0.3, pz = len > 1e-6 ? dxs / len * 0.3 : 0;   // yan noktalar
+        double[][] pts = {
+                {cx, b.minY() + h * 0.5, cz}, {cx, b.minY() + h * 0.9, cz}, {cx, b.minY() + h * 0.15, cz},
+                {cx + px, b.minY() + h * 0.5, cz + pz}, {cx - px, b.minY() + h * 0.5, cz - pz}};
+        for (double[] pt : pts) {
+            Vector dir = new Vector(pt[0] - eye.getX(), pt[1] - eye.getY(), pt[2] - eye.getZ());
+            double dist = dir.length();
+            if (dist < 0.8) return true;
+            dir.normalize();
+            RayTraceResult rr = p.getWorld().rayTraceBlocks(eye, dir, dist - 0.1, FluidCollisionMode.NEVER, true);
+            if (rr == null) return true;
+        }
+        return false;
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlaceBlock(BlockPlaceEvent e) {
         PlayerData d = plugin.data(e.getPlayer());
         if (d.mitActive("PLACE", System.currentTimeMillis())) e.setCancelled(true);
     }
 
-    /** Scaffold: yanlış yüz, ışın uyuşmazlığı, yerleştirme hızı. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlace(BlockPlaceEvent e) {
         Player p = e.getPlayer();

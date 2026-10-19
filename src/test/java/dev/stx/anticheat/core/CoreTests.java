@@ -427,6 +427,33 @@ public class CoreTests {
         check(l3.load("bozuk satır\nV|not-a-uuid|x|y|1\nV|" + id + "|Ali|Fly|abc\n") == 3, "bozuk kayıtlar atlanır, çökmez");
 
         Jesus();
+        bansAndAim();
+    }
+
+    static void bansAndAim() {
+        UUID id = UUID.randomUUID(); long now = 5_000_000L, until = now + 7L * 86_400_000L;
+        ViolationLedger l = new ViolationLedger();
+        check(l.banUntil(id, now) == 0, "ban yokken banUntil=0");
+        l.setBan(id, "Ahmet", until, "3/3");
+        check(l.banUntil(id, now) == until, "7 günlük ban kaydedildi");
+        ViolationLedger l2 = new ViolationLedger(); l2.load(l.serialize(now, 1L << 40));
+        check(l2.banUntil(id, now + 1000) == until && l2.banReason(id).equals("3/3"), "ban sunucu yeniden başlatılınca korunur");
+        check(l2.banUntil(id, until + 1) == 0, "süre bitince ban kalkar");
+        check(l2.uuidByName("ahmet").equals(id), "isimden UUID bulma (unban için)");
+        l2.unban(id);
+        check(l2.banUntil(id, now) == 0, "unban");
+
+        Random r = new Random(11);
+        AimAssistCheck a = new AimAssistCheck(25, 1.2, 0.7); int n = 0;
+        for (int i = 0; i < 2500; i++) if (a.onHit(Math.abs(r.nextGaussian()) * 4.0 + 0.5) != null) n++;
+        check(n == 0, "AimAssist: insan nişanı (dağınık sapma) kanıt üretmiyor");
+        a = new AimAssistCheck(25, 1.2, 0.7); n = 0;
+        for (int i = 0; i < 100; i++) if (a.onHit(0.2 + r.nextDouble() * 0.4) != null) n++;
+        check(n > 0, "AimAssist: hep merkeze kilitli nişan tespit");
+
+        var box = List.of(Box.ofEntity(0, 0, 3, 0.6, 1.8));
+        check(AimCheck.minAngle(0, 1.62, 0, 0f, 0f, box) < 15, "minAngle: hedefe bakarken küçük açı");
+        check(AimCheck.minAngle(0, 1.62, 0, 180f, 0f, box) > 150, "minAngle: arkaya bakarken büyük açı");
     }
 
     static void Jesus() {
