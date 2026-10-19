@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.bukkit.World;
 
 /** Oyuncu başına durum. Yalnızca ana iş parçacığında kullanılır (Bukkit olayları). Bellek sabit boyutludur. */
 public final class PlayerData {
@@ -29,6 +30,7 @@ public final class PlayerData {
     public ScaffoldCheck scaffold;
     public CriticalsCheck criticals;
     public WindowCheck window;
+    public JesusCheck jesus;
     public final FlagBuffer wallBuf = new FlagBuffer(4, 0.5);
     public final FlagBuffer phaseBuf = new FlagBuffer(3, 0.5);
 
@@ -47,6 +49,23 @@ public final class PlayerData {
     private double yawAbs1, yawAbs2;
 
     public final Map<String, Long> lastAlertMs = new HashMap<>();
+
+    /** Aktif geçici müdahaleler: tür (ATTACK/MOVE/PLACE/CONTAINER) -> bitiş (duvar saati ms). */
+    public final Map<String, Long> mitUntil = new HashMap<>();
+    public boolean selfSetback, setbackQueued, hasGood;
+    public long lastSetbackMs;
+    public World goodWorld;
+    public double goodX, goodY, goodZ;
+    public float goodYaw, goodPitch;
+
+    public boolean mitActive(String type, long nowWall) {
+        Long u = mitUntil.get(type);
+        return u != null && u > nowWall;
+    }
+
+    public void setGood(World w, double x, double y, double z, float yaw, float pitch) {
+        goodWorld = w; goodX = x; goodY = y; goodZ = z; goodYaw = yaw; goodPitch = pitch; hasGood = true;
+    }
 
     private final long[] hT = new long[HIST];
     private final double[] hX = new double[HIST], hY = new double[HIST], hZ = new double[HIST];
@@ -75,6 +94,7 @@ public final class PlayerData {
         rotation = new RotationCheck(c.ci("Rotation", "window", 40), c.cd("Rotation", "min-step", 0.005));
         scaffold = new ScaffoldCheck(c.ci("Scaffold", "rate-per-20-ticks", 14));
         criticals = new CriticalsCheck();
+        jesus = new JesusCheck(c.ci("Jesus", "ticks", 12));
         window = new WindowCheck(c.ci("ChestStealer", "min-open-ticks", 3), c.ci("ChestStealer", "samples", 12),
                 c.cd("ChestStealer", "min-stddev", 0.3));
     }

@@ -16,6 +16,13 @@ public final class ReachCheck {
         this.buf = new FlagBuffer(bufferLimit, 0.35);
     }
 
+    /** Hedefin ping penceresindeki en yakın konumuna göz mesafesi. */
+    public static double minDistance(double ex, double ey, double ez, List<Box> history) {
+        double min = Double.MAX_VALUE;
+        for (Box b : history) min = Math.min(min, Geometry.distance(b, ex, ey, ez));
+        return min;
+    }
+
     public Result onHit(double ex, double ey, double ez, List<Box> history, double allowedReach) {
         if (history.isEmpty()) return null;
         double min = Double.MAX_VALUE;

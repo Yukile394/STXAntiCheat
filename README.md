@@ -6,7 +6,7 @@ bu yüzden 1.21.x sürümleri arasında yeniden derleme gerektirmesi beklenmez.
 ## Derleme
 Yerelde (Java 21 gerekir; Gradle ayrıca kurmanız gerekmez, `gradlew` 8.10'u kendisi indirir):
 ```
-./gradlew build         # build/libs/STXAntiCheat-1.0.0.jar  (+ 80 çekirdek test)
+./gradlew build         # build/libs/STXAntiCheat-1.0.0.jar  (+ 96 çekirdek test)
 ./gradlew coreTests     # yalnızca tespit mantığı testleri
 ```
 Windows'ta `gradlew.bat build`. JAR'ı sunucunun `plugins/` klasörüne atın.
@@ -20,13 +20,33 @@ git tag v1.0.0 && git push origin v1.0.0
 Windows'tan yüklerseniz `gradlew` çalıştırma biti kaybolabilir; workflow `chmod +x gradlew` ile bunu zaten düzeltir
 (yerelde için: `git update-index --chmod=+x gradlew`).
 
+## Kademeli müdahale sistemi
+Her kontrol **kendi puanını** tutar. Puan `confirm-points` altındaysa (**LOW**) yalnızca kayıt tutulur. Üstüne çıkarsa
+bir **ihlal** sayılır (aynı hile için en fazla dakikada bir; UUID bazlı, `plugins/STXAntiCheat/data/violations.dat` içinde
+kalıcı, 72 saat sonra düşer):
+
+| İhlal | Müdahale | Mesaj |
+|---|---|---|
+| 1 | geçici (varsayılan 15 sn) hileye özel engel | `§e§lAntiCheat §8» §eŞüpheli hareketlerin algılandı! 15 saniye boyunca saldırıların engellendi. §7(1/3)` |
+| 2 | daha uzun (30 sn) kısıtlama | `§e§lAntiCheat §8» §6Hile şüphesi devam ediyor! Hareketlerin kısıtlandı. §7(2/3)` |
+| 3 | **BAN** – yalnızca ban-uygun hile + HIGH kanıt + ≥2 bağımsız hile türü + kilit açıkken | `§c§lAntiCheat §8» §cBirden fazla hile ihlali tespit edildi. Sunucudan yasaklandın. §7(3/3)` |
+
+Hileye özel müdahale (`checks.<Ad>.mitigation`): **ATTACK** (vuruşlar iptal) · **MOVE** (son temiz konuma geri alma +
+kısıt süresince doğrulanmış her yeni kanıtta tekrar geri alma) · **PLACE** (blok koyma iptal) · **CONTAINER** (sandık
+işlemleri iptal) · **NONE** (yalnızca kayıt). Reach'te ayrıca ulaşılamayan vuruş ihlal sayısından bağımsız anında iptal edilir.
+Her hile için ayrı `confirm-points`, `strong-points`, `violations-to-ban`, süreler ve `ban-eligible` ayarlanabilir.
+AutoClicker, Criticals, ChestStealer, GuiMove, Velocity, Rotation **ban-uygun değildir** (en fazla geçici kısıt).
+
+Çıkıp girme: girişte tüm kontroller sıfırdan kurulur (`reinit`), ihlaller UUID'den, bitmemiş kısıtlamalar defterden
+geri yüklenir (relog ile kaçış yok). Dünya değişimi, respawn, teleport ve kendi geri-ışınlamamız için ayrı kısa tolerans vardır.
+Defter periyodik (asenkron, atomik yazım), çıkışta ve kapanışta kaydedilir.
+
 ## Güvenli kullanım (önerilen sıra)
-1. Varsayılan config ile açın: **ceza KAPALI**, yalnızca kayıt + staff uyarısı (`/stx alerts`).
-2. `plugins/STXAntiCheat/logs/stx-*.jsonl` dosyalarını birkaç gün inceleyin. Her kayıtta oyuncu, kontrol, ayrıntı,
-   ping, TPS, konum ve tüm kontrollerin güncel puan geçmişi vardır. `WOULD_PUNISH_*` kayıtları "ceza açık olsaydı
-   verilecekti" demektir; meşru oyuncu görürseniz ilgili kontrolün `weight`/eşiğini düşürün veya kapatın.
-3. Yanlış pozitif görmüyorsanız `punishment.enabled: true` **ve** `punishment.i-have-reviewed-the-logs: true` yapın.
-   İkisi birden açık olmadan hiçbir kick/ban çalışmaz.
+1. Varsayılan: geçici müdahaleler **açık**, kalıcı ban **kilitli** (`sanctions.ban-enabled: false`). 3/3'e ulaşan oyuncu
+   atılmaz/banlanmaz; `WOULD_BAN` olarak loglanır ve OP'lere bildirilir.
+2. `logs/stx-*.jsonl` içindeki `VIOLATION_*` ve `WOULD_BAN` kayıtlarını inceleyin. Hatalı kısıtlanan oyuncu için `/stx reset <oyuncu>`.
+3. Yanlış pozitif görmüyorsanız `sanctions.ban-enabled: true` **ve** `sanctions.i-have-reviewed-the-logs: true` yapın.
+   İkisi birden açık olmadan hiçbir ban çalışmaz. Geçici müdahaleyi kapatmak için `sanctions.mitigation-enabled: false`.
 
 ## OP bildirimleri
 Oyuncu **atılmadığında** (ceza kapalıyken) tespitler OP'lere görünür (`alerts:` bölümü):
@@ -60,13 +80,15 @@ Oyuncu **atılmadığında** (ceza kapalıyken) tespitler OP'lere görünür (`a
 | Scaffold, Tower | Scaffold | imkansız yüz, bakış–blok ışını, yerleştirme hızı |
 | ChestStealer, AutoTotem (kısmi), GuiMove/InvMove | ChestStealer, GuiMove | açılış sonrası ilk tık, ritim, konteyner açıkken yürüme |
 | Phase | Phase | önceki konum serbest, yeni konum katı blok içinde |
+| Jesus | Jesus | sıvı yüzeyinde (içinde değil) düz yatay ilerleme |
+| Spider | Spider | yukarı yönlü yerçekimi sapması + duvar yanında |
 
 ## Bilinen sınırlar (dürüst liste)
 - **Paket katmanı yok.** Yalnızca Bukkit olayları kullanılır. Sonuçları:
   alt-tik tıklama zamanlaması güvenilmez (bu yüzden tik bazlı + geniş örneklem), `AirStuck`/`Blink`/`TickShift`
   yalnızca Timer üzerinden dolaylı ve zayıf yakalanır, `onGround` bayrağına bağımlı kontroller sunucu çarpışma
   sorgusuyla desteklenir.
-- **Kapsam dışı / zayıf:** Jesus (sıvı özel durum sayıldığı için atlanır), FastUse, SpeedMine, NoJumpDelay,
+- **Kapsam dışı / zayıf:** FastUse, SpeedMine, NoJumpDelay,
   Invsee/Region exploit'leri (istemci dosyalarıyla çalışır, sunucudan görünmez), EnderChest "sahte kapama".
   `ClickTP` gibi >10 blokluk tek adımlar şüphe değil **tolerans** sayılır (başka plugin'in teleportunu cezalandırmamak için).
 - Reach yaklaşık **≥ 3.4–3.5** hilelerini yakalar; 3.1–3.3 gibi küçük uzatmalar bilinçli olarak geçer.
@@ -74,11 +96,13 @@ Oyuncu **atılmadığında** (ceza kapalıyken) tespitler OP'lere görünür (`a
 - Folia desteklenmez.
 
 ## Test durumu
-- Çekirdek mantık (`core/`): **80 otomatik test geçiyor**; meşru yürüme/sprint/bunny-hop/düşme/knockback/lag
+- Çekirdek mantık (`core/`): **96 otomatik test geçiyor** (ihlal defteri kalıcılığı/relog, ceza basamakları ve ban kilitleri, Jesus dahil); meşru yürüme/sprint/bunny-hop/düşme/knockback/lag
   senaryolarında 0 kanıt, hile senaryolarında tespit.
 - Paper adaptörü (`bukkit/`): gerçek Paper API'si ile **derlenmedi ve canlı sunucuda denenmedi**
   (geliştirme ortamında API indirilemedi; yalnızca kendi stub'larımla iç tutarlılık denendi). İlk `./gradlew build`
   derleme hatası verirse çıktıyı paylaşın, düzeltilir.
+- **Test EDİLMEYENLER:** geri-ışınlama, vuruş/blok/konteyner iptali, relog'da kısıt geri yükleme ve oyuncu mesajları
+  Paper adaptöründe yer aldığı için yalnızca derleme düzeyinde (stub) kontrol edildi; canlıda doğrulanmalıdır.
 - Gerçek hile istemcisiyle test yapılmadı; eşikler fizik simülasyonuna dayanır. Canlıda log-only modda doğrulayın.
 
 ## Komutlar

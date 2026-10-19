@@ -16,14 +16,28 @@ final class MovementListener implements Listener {
 
     MovementListener(STXAntiCheat plugin) { this.plugin = plugin; }
 
+    private boolean flag(Player p, PlayerData d, String name, Result r) {
+        if (r == null) return false;
+        plugin.flagger().flag(p, d, name, r);
+        return true;
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onMove(PlayerMoveEvent e) {
         Player p = e.getPlayer();
+        try {
+            handle(e, p);
+        } catch (Throwable t) {
+            // Bir hata tüm AntiCheat'i veya diğer kontrolleri durdurmasın
+            plugin.getLogger().warning("Hareket kontrolü hatası (" + p.getName() + "): " + t);
+        }
+    }
+
+    private void handle(PlayerMoveEvent e, Player p) {
         PlayerData d = plugin.data(p);
         Location from = e.getFrom(), to = e.getTo();
         if (to == null || to.getWorld() == null) return;
         STXConfig cfg = plugin.cfg();
-        Flagger fl = plugin.flagger();
         long tick = plugin.tick();
         long nowMs = STXAntiCheat.nowMs();
 
@@ -41,63 +55,60 @@ final class MovementListener implements Listener {
         d.pushYawDelta(Math.abs(dYaw));
         d.lastYaw = yaw; d.lastPitch = pitch;
 
-        // Açıklanamayan büyük tek adım (başka plugin'in setTo'su vb.) -> tolerans, ceza değil
         if (dx * dx + dy * dy + dz * dz > 100.0) d.grace(tick + cfg.i("safety.teleport-grace-ticks", 30));
 
-        String reason = plugin.exemptReason(p, d);
+        boolean exempt = plugin.exemptReason(p, d) != null;
         boolean lag = plugin.lagging(p, d);
-        boolean exempt = reason != null;
+        boolean bad = false;
 
-        // Konum geçmişi (Reach/Aim için hedef konumları) her zaman tutulur
         d.pushPos(nowMs, to.getX(), to.getY(), to.getZ());
 
-        // ---- Timer: her hareket/rotasyon paketi 50ms istemci zamanı harcar ----
-        Result tr = d.timer.onMove(nowMs, exempt || lag);
-        if (tr != null) fl.flag(p, d, "Timer", tr);
+        bad |= flag(p, d, "Timer", d.timer.onMove(nowMs, exempt || lag));
 
-        // ---- Rotasyon GCD: yalnızca savaşta, bedrock/sunucu rotasyonu dışında ----
-        if (!exempt && !lag && d.inCombat(tick) && !(d.bedrock && cfg.b("general.bedrock-relaxed", true))) {
-            Result rr = d.rotation.onRotation(dPitch);
-            if (rr != null) fl.flag(p, d, "Rotation", rr);
-        }
+        if (!exempt && !lag && d.inCombat(tick) && !(d.bedrock && cfg.b("general.bedrock-relaxed", true)))
+            bad |= flag(p, d, "Rotation", d.rotation.onRotation(dPitch));
 
         if (moved) {
-            MoveSample s;
-            boolean standing = false;
-            boolean special = false;
             World w = to.getWorld();
+            boolean standing;
+            boolean special = false;
             if (exempt || lag) {
-                s = new MoveSample(tick, dx, dy, dz, yaw, pitch, p.isOnGround(), p.isOnGround(), true, false, false, false,
-                        false, 1.0, 0, false, p.getFallDistance());
+                MoveSample s = new MoveSample(tick, dx, dy, dz, yaw, pitch, p.isOnGround(), p.isOnGround(), true, false, false,
+                        false, false, 1.0, 0, false, p.getFallDistance());
                 standing = p.isOnGround();
-                // durumları sıfırlamak için örnek ver; sonuç yok sayılır
                 d.air.onMove(s); d.speed.onMove(s); d.noFall.onMove(s, () -> true); d.noSlow.onMove(s);
+                d.jesus.onMove(false, 0, 0, true);
             } else {
-                standing = Probe.standing(p, to.getX(), to.getY(), to.getZ());
-                special = Probe.special(p, d, to.getX(), to.getY(), to.getZ(), tick);
-                boolean ice = Probe.ice(d, w, to.getX(), to.getY(), to.getZ(), tick);
+                final double tx = to.getX(), ty = to.getY(), tz = to.getZ();
+                standing = Probe.standing(p, tx, ty, tz);
+                special = Probe.special(p, d, tx, ty, tz, tick);
+                boolean ice = Probe.ice(d, w, tx, ty, tz, tick);
                 boolean velGrace = tick < d.velocityUntilTick;
-                s = new MoveSample(tick, dx, dy, dz, yaw, pitch, p.isOnGround(), standing, false, velGrace, special,
+                MoveSample s = new MoveSample(tick, dx, dy, dz, yaw, pitch, p.isOnGround(), standing, false, velGrace, special,
                         Probe.gravityAltered(p), ice, Probe.speedMul(p), Probe.jumpLevel(p), p.isHandRaised(),
                         p.getFallDistance());
-                final double tx = to.getX(), ty = to.getY(), tz = to.getZ();
 
                 Result r = d.air.onMove(s);
-                if (r != null) fl.flag(p, d, airName(r), r);
-                r = d.speed.onMove(s);
-                if (r != null) fl.flag(p, d, "Speed", r);
-                r = d.noFall.onMove(s, () -> Probe.supportedLoose(p, tx, ty, tz));
-                if (r != null) fl.flag(p, d, "NoFall", r);
-                r = d.noSlow.onMove(s);
-                if (r != null) fl.flag(p, d, "NoSlow", r);
-                r = d.velocity.onMove(s, nowMs);
-                if (r != null) fl.flag(p, d, "Velocity", r);
+                if (r != null) {
+                    String name = airName(r);
+                    // Yukarı yönlü Fly sapması duvar yanındaysa Spider olarak adlandır
+                    if (name.equals("Fly") && dy > 0 && r.detail().startsWith("Fly") && Probe.nearWall(w, tx, ty, tz)) name = "Spider";
+                    bad |= flag(p, d, name, r);
+                }
+                bad |= flag(p, d, "Speed", d.speed.onMove(s));
+                bad |= flag(p, d, "NoFall", d.noFall.onMove(s, () -> Probe.supportedLoose(p, tx, ty, tz)));
+                bad |= flag(p, d, "NoSlow", d.noSlow.onMove(s));
+                bad |= flag(p, d, "Velocity", d.velocity.onMove(s, nowMs));
                 d.criticals.onMove(tick, s, d.lastStanding);
+                bad |= flag(p, d, "GuiMove", d.window.onMoveWhileOpen(tick, s.hSpeed(), standing, special || velGrace));
 
-                r = d.window.onMoveWhileOpen(tick, s.hSpeed(), standing, special || velGrace);
-                if (r != null) fl.flag(p, d, "GuiMove", r);
+                boolean surface = !standing && !p.isInWater() && !p.isSwimming() && Probe.liquidBelow(w, tx, ty, tz);
+                bad |= flag(p, d, "Jesus", d.jesus.onMove(surface, dy, s.hSpeed(), false));
 
-                if (cfg.enabled("Phase") && !special && !velGrace) phase(p, d, from, to, w);
+                if (cfg.enabled("Phase") && !special && !velGrace) bad |= phase(p, d, from, to, w);
+
+                // Geri-ışınlama için "son temiz konum": yerde, kanıtsız, özel ortam dışı
+                if (!bad && standing && !special) d.setGood(w, tx, ty, tz, yaw, pitch);
             }
             d.lastStanding = standing;
             d.lastHSpeed = Math.hypot(dx, dz);
@@ -112,15 +123,17 @@ final class MovementListener implements Listener {
         return "Fly";           // Fly, Hover, FastFall
     }
 
-    /** Phase/NoClip: önceki konum serbestken yeni konum katı blok içinde. */
-    private void phase(Player p, PlayerData d, Location from, Location to, World w) {
+    private boolean phase(Player p, PlayerData d, Location from, Location to, World w) {
         double h = p.getHeight();
         boolean inside = Probe.insideSolid(w, to.getX(), to.getY(), to.getZ(), h);
-        if (!inside) { d.phaseBuf.pass(); return; }
-        if (Probe.insideSolid(w, from.getX(), from.getY(), from.getZ(), h)) return;     // zaten içindeydi (sıkışma vb.)
-        if (Probe.movingBlocksNear(w, to.getX(), to.getY(), to.getZ())) return;
-        if (d.phaseBuf.fail(1))
+        if (!inside) { d.phaseBuf.pass(); return false; }
+        if (Probe.insideSolid(w, from.getX(), from.getY(), from.getZ(), h)) return false;
+        if (Probe.movingBlocksNear(w, to.getX(), to.getY(), to.getZ())) return false;
+        if (d.phaseBuf.fail(1)) {
             plugin.flagger().flag(p, d, "Phase", Result.of(1.0, String.format(java.util.Locale.ROOT,
                     "Phase: katı bloğa girdi (%.2f,%.2f,%.2f)", to.getX(), to.getY(), to.getZ())));
+            return true;
+        }
+        return false;
     }
 }

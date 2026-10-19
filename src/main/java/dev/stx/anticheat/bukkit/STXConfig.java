@@ -1,6 +1,6 @@
 package dev.stx.anticheat.bukkit;
 
-import dev.stx.anticheat.core.PunishPolicy;
+import dev.stx.anticheat.core.SanctionPolicy;
 import java.util.List;
 import org.bukkit.configuration.file.FileConfiguration;
 
@@ -22,15 +22,28 @@ public final class STXConfig {
     public int ci(String check, String key, int def) { return c.getInt("checks." + check + "." + key, def); }
     public boolean cb(String check, String key, boolean def) { return c.getBoolean("checks." + check + "." + key, def); }
 
-    public PunishPolicy.Thresholds thresholds() {
-        return new PunishPolicy.Thresholds(
-                d("punishment.alert-total", 10), d("punishment.kick-total", 40), d("punishment.ban-total", 90),
-                i("punishment.min-distinct-checks", 2), d("punishment.distinct-min-points", 6),
-                d("punishment.single-check-kick", 60), d("punishment.single-check-ban", 120));
+    // ---- kademeli müdahale kuralları: checks.<Ad>.<anahtar>, yoksa sanctions.default.<anahtar> ----
+    private double sd(String check, String key, double def) {
+        String p = "checks." + check + "." + key;
+        return c.isSet(p) ? c.getDouble(p) : c.getDouble("sanctions.default." + key, def);
     }
 
-    /** Ceza ancak iki ayrı emniyet de açıksa verilir. */
-    public boolean punishmentActive() {
-        return b("punishment.enabled", false) && b("punishment.i-have-reviewed-the-logs", false);
+    public SanctionPolicy.Rule rule(String check) {
+        return new SanctionPolicy.Rule(c.getBoolean("checks." + check + ".ban-eligible", false),
+                (int) sd(check, "violations-to-restrict", 2), (int) sd(check, "violations-to-ban", 3),
+                sd(check, "confirm-points", 6), sd(check, "strong-points", 14),
+                (long) (sd(check, "expire-hours", 72) * 3_600_000L),
+                (long) (sd(check, "violation-cooldown-seconds", 60) * 1000L),
+                (int) sd(check, "mitigation-seconds", 15), (int) sd(check, "restrict-seconds", 30));
+    }
+
+    /** ATTACK, MOVE, PLACE, CONTAINER veya NONE */
+    public String mitigationType(String check) {
+        return c.getString("checks." + check + ".mitigation", "NONE").toUpperCase(java.util.Locale.ROOT);
+    }
+
+    /** Kalıcı ban ancak iki ayrı emniyet de açıksa verilir. */
+    public boolean banActive() {
+        return b("sanctions.ban-enabled", false) && b("sanctions.i-have-reviewed-the-logs", false);
     }
 }

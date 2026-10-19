@@ -1,16 +1,17 @@
 package dev.stx.anticheat.bukkit;
 
-import dev.stx.anticheat.core.PunishPolicy;
 import dev.stx.anticheat.core.Result;
+import dev.stx.anticheat.core.SanctionPolicy;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
-/** Kanıt -> şüphe puanı -> log -> uyarı -> (isteğe bağlı) ceza. Ceza varsayılan olarak kapalıdır. */
+/** Kanıt -> kontrol başına puan -> (doğrulanmışsa) kalıcı ihlal -> kademeli müdahale. */
 final class Flagger {
     private final STXAntiCheat plugin;
     private static final LegacyComponentSerializer AMP = LegacyComponentSerializer.legacyAmpersand();
@@ -27,35 +28,30 @@ final class Flagger {
         long now = System.currentTimeMillis();
         double pts = d.suspicion.add(check, w, now);
         double total = d.suspicion.total(now);
-        PunishPolicy.Action action = plugin.policy().decide(d.suspicion, now);
+        SanctionPolicy.Rule rule = c.rule(check);
+        SanctionPolicy.Level lvl = SanctionPolicy.level(pts, rule);
 
-        record("EVIDENCE", p, d, check, r.detail(), w, pts, total, now);
+        record("EVIDENCE", p, d, check, "[" + lvl + "] " + r.detail(), w, pts, total, now);
         alert(p, d, check, r.detail(), pts, now);
+        if (lvl == SanctionPolicy.Level.LOW) return;          // düşük güven: yalnızca kayıt
 
-        if (action == PunishPolicy.Action.KICK || action == PunishPolicy.Action.BAN) {
-            if (c.punishmentActive()) {
-                if (now >= d.punishCooldownUntilMs) {
-                    d.punishCooldownUntilMs = now + c.i("punishment.cooldown-seconds", 120) * 1000L;
-                    record("PUNISH_" + action, p, d, check, r.detail(), w, pts, total, now);
-                    String key = action == PunishPolicy.Action.BAN ? "punishment.ban-command" : "punishment.kick-command";
-                    runCommand(c.s(key, "kick %player%"), p, check, total);
-                    d.suspicion.clear();
-                }
-            } else if (c.b("punishment.dry-run-logging", true) && now >= d.wouldCooldownUntilMs) {
-                d.wouldCooldownUntilMs = now + 60_000L;
-                record("WOULD_PUNISH_" + action, p, d, check, r.detail(), w, pts, total, now);
-                notifyNotPunished(p, d, action, check, r.detail(), total, now);
-            }
-        }
+        // Aktif hareket kısıtı varken doğrulanmış yeni kanıt -> anında geri alma (ihlal sayısı artmaz)
+        if (c.b("sanctions.mitigation-enabled", true) && c.mitigationType(check).equals("MOVE") && d.mitActive("MOVE", now))
+            plugin.sanctions().setback(p, d);
+
+        // Yeni "ihlal" yalnızca cooldown sonrası sayılır: her şüpheli hareket ban sebebi olmaz
+        UUID id = p.getUniqueId();
+        if (now - plugin.ledger().lastViolation(id, check) < rule.violationCooldownMs()) return;
+        int n = plugin.ledger().record(id, p.getName(), check, now, rule.expireMs());
+        int distinct = plugin.ledger().distinctChecks(id, now, k -> plugin.cfg().rule(k).expireMs());
+        SanctionPolicy.Stage st = SanctionPolicy.stage(lvl, n, rule, distinct, c.i("sanctions.min-distinct-checks-for-ban", 2));
+        plugin.markDirty();
+        record("VIOLATION_" + st, p, d, check, "n=" + n + " bağımsız=" + distinct + " seviye=" + lvl + " | " + r.detail(), w, pts, total, now);
+        plugin.sanctions().execute(p, d, check, st, n, rule, now);
     }
 
-    @SuppressWarnings("deprecation")
-    private void runCommand(String template, Player p, String check, double total) {
-        String cmd = template.replace("%player%", p.getName()).replace("%check%", check)
-                .replace("%total%", String.format(Locale.ROOT, "%.1f", total));
-        cmd = org.bukkit.ChatColor.translateAlternateColorCodes('&', cmd);
-        if (cmd.startsWith("/")) cmd = cmd.substring(1);
-        Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+    void recordEvent(String type, Player p, PlayerData d, String check, String detail, long now) {
+        record(type, p, d, check, detail, 0, d.suspicion.points(check, now), d.suspicion.total(now), now);
     }
 
     private void alert(Player p, PlayerData d, String check, String detail, double pts, long now) {
@@ -72,27 +68,11 @@ final class Flagger {
             if (!plugin.alertsEnabled(s.getUniqueId())) continue;
             boolean op = c.b("alerts.notify-ops", true) && s.isOp();
             boolean staff = s.hasPermission("stx.alerts");
-            if (op && opsAll) s.sendMessage(msg);                    // OP: puan eşiğinden bağımsız hepsi
+            if (op && opsAll) s.sendMessage(msg);
             else if ((staff || op) && pts >= threshold) s.sendMessage(msg);
         }
         if (c.b("logging.console", false) && d.suspicion.total(now) >= c.d("logging.console-min-total", 8))
             plugin.getLogger().info(p.getName() + " " + check + " (" + String.format(Locale.ROOT, "%.1f", pts) + ") " + detail);
-    }
-
-    /** Ceza eşiği aşıldı ama oyuncu ATILMADI (ceza kapalı) -> OP'lere ve yetkililere bildir. */
-    private void notifyNotPunished(Player p, PlayerData d, PunishPolicy.Action action, String check, String detail,
-                                   double total, long now) {
-        STXConfig c = plugin.cfg();
-        if (!c.b("alerts.notify-when-not-punished", true)) return;
-        Component msg = AMP.deserialize(String.format(Locale.ROOT,
-                "&8[&bSTX&8] &e⚠ &f%s &7için &c%s &7eşiği aşıldı (toplam &c%.1f&7, bağımsız kanıt &c%d&7) ama ceza KAPALI olduğu için "
-                        + "&aatılmadı&7. Son kanıt: &f%s &8- &7%s &8| &7/stx status %s",
-                p.getName(), action, total,
-                d.suspicion.distinct(c.d("punishment.distinct-min-points", 6), now), check, detail, p.getName()));
-        for (Player s : Bukkit.getOnlinePlayers()) {
-            if (!plugin.alertsEnabled(s.getUniqueId())) continue;
-            if ((c.b("alerts.notify-ops", true) && s.isOp()) || s.hasPermission("stx.alerts")) s.sendMessage(msg);
-        }
     }
 
     private void record(String type, Player p, PlayerData d, String check, String detail,
@@ -110,13 +90,11 @@ final class Flagger {
         h.append('}');
         String json = String.format(Locale.ROOT,
                 "{\"ts\":\"%s\",\"type\":\"%s\",\"player\":\"%s\",\"uuid\":\"%s\",\"check\":\"%s\",\"detail\":\"%s\","
-                        + "\"weight\":%.2f,\"points\":%.2f,\"total\":%.2f,\"distinct\":%d,\"ping\":%d,\"tps\":%.2f,"
+                        + "\"weight\":%.2f,\"points\":%.2f,\"total\":%.2f,\"ping\":%d,\"tps\":%.2f,"
                         + "\"gamemode\":\"%s\",\"world\":\"%s\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"history\":%s}",
                 java.time.Instant.ofEpochMilli(now), type, ViolationLog.esc(p.getName()), d.uuid, ViolationLog.esc(check),
-                ViolationLog.esc(detail), weight, pts, total,
-                d.suspicion.distinct(plugin.cfg().d("punishment.distinct-min-points", 6), now),
-                p.getPing(), plugin.tps(), p.getGameMode(), ViolationLog.esc(l.getWorld().getName()),
-                l.getX(), l.getY(), l.getZ(), h);
+                ViolationLog.esc(detail), weight, pts, total, p.getPing(), plugin.tps(), p.getGameMode(),
+                ViolationLog.esc(l.getWorld().getName()), l.getX(), l.getY(), l.getZ(), h);
         plugin.violationLog().write(json);
     }
 }

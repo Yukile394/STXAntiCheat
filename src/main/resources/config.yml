@@ -39,20 +39,28 @@ alerts:
   ops-see-all-evidence: true     # OP'ler puan eşiğine bakılmadan HER kanıtı görür
   notify-when-not-punished: true # ceza eşiği aşıldı ama oyuncu atılmadıysa (ceza kapalı) OP'lere bildir
 
-punishment:
-  enabled: false                 # 1) ceza sistemi
-  i-have-reviewed-the-logs: false # 2) ikinci emniyet: loglar incelendi mi? İkisi de true olmadan CEZA VERİLMEZ.
-  dry-run-logging: true          # ceza kapalıyken "cezalandırılacaktı" kaydı (WOULD_PUNISH) yaz
-  cooldown-seconds: 120
-  alert-total: 10
-  kick-total: 40
-  ban-total: 90
-  min-distinct-checks: 2         # ceza için birbirinden bağımsız en az kaç kontrol
-  distinct-min-points: 6         # bir kontrolün "bağımsız kanıt" sayılması için gereken puan
-  single-check-kick: 60          # tek kontrol bu puana ulaşırsa (toplam eşiğiyle birlikte) tek başına yeter
-  single-check-ban: 120
-  kick-command: "kick %player% &c[STX] Hile şüphesi tespit edildi."
-  ban-command: "ban %player% [STX] Hile kullanımı (otomatik, kanıtlı: %check%)"
+# ===== Kademeli müdahale =====
+# Her kontrol bağımsız puan toplar. Puan "confirm-points" üstüne çıkarsa bir İHLAL sayılır (en fazla dakikada bir,
+# kalıcı ve UUID bazlı). Düşük puan = yalnızca kayıt.
+#   1. ihlal -> geçici müdahale (örn. 15 sn saldırı/hareket engeli)      (1/3)
+#   2. ihlal -> daha uzun kısıtlama                                      (2/3)
+#   3. ihlal -> BAN, ama yalnızca: ban-uygun hile + HIGH kanıt + en az N bağımsız hile türü + ban kilidi açık (3/3)
+sanctions:
+  mitigation-enabled: true       # geçici, kendiliğinden biten müdahaleler (güvenli)
+  ban-enabled: false             # KALICI BAN KİLİDİ. Kapalıyken kimse atılmaz/banlanmaz; WOULD_BAN olarak loglanır.
+  i-have-reviewed-the-logs: false # ikinci emniyet: loglar incelendi mi? İkisi de true olmadan BAN YOK.
+  min-distinct-checks-for-ban: 2
+  save-interval-seconds: 300
+  ban-command: "ban %player% %reason%"
+  default:
+    confirm-points: 6            # ihlal sayılması için kontrol puanı (MEDIUM)
+    strong-points: 14            # güçlü kanıt (HIGH) – ban için gerekli
+    violations-to-restrict: 2
+    violations-to-ban: 3
+    expire-hours: 72             # ihlaller bu süre sonunda sayılmaz (yanlış pozitif birikmesin)
+    violation-cooldown-seconds: 60
+    mitigation-seconds: 15
+    restrict-seconds: 30
 
 logging:
   file: true                     # plugins/STXAntiCheat/logs/stx-YYYY-MM-DD.jsonl
@@ -69,11 +77,16 @@ checks:
     tolerance: 0.30              # hedefin ping penceresindeki en yakın konumundan sonra eklenen pay
     buffer: 6
     mob-extra: 0.30
+    cancel-margin: 0.50          # bu kadar açık aşımda vuruş anında iptal edilir
+    mitigation: ATTACK
+    ban-eligible: true
   Aim:                           # bakış ışını hedefi ıskalıyor (rotasyonsuz Aura, HitBox)
     enabled: true
     weight: 1.0
     expand: 0.15
     buffer: 7
+    mitigation: ATTACK
+    ban-eligible: true
   Aura:                          # çoklu hedef, snap, duvar arkası
     enabled: true
     weight: 1.0
@@ -81,6 +94,8 @@ checks:
     multi-ticks: 5
     flick-degrees: 60
     wall-check: true
+    mitigation: ATTACK
+    ban-eligible: true
   AutoClicker:
     enabled: true
     weight: 1.0
@@ -88,60 +103,101 @@ checks:
     sustain-seconds: 3
     consistency-samples: 40
     consistency-min-stddev: 0.35
+    mitigation: ATTACK
+    ban-eligible: false
   Velocity:                      # Anti-Knockback
     enabled: true
     weight: 1.0
     min-ratio: 1.2               # vanilla en kötü durumda ≈4.7 ölçüldü
     buffer: 3
+    mitigation: NONE
+    ban-eligible: false
   Fly:                           # Fly, Hover, FastFall
     enabled: true
     weight: 1.0
     hover-ticks: 8
     max-rise: 1.32
+    mitigation: MOVE
+    ban-eligible: true
   Step:
     enabled: true
     weight: 1.0
+    mitigation: MOVE
+    ban-eligible: true
   HighJump:
     enabled: true
     weight: 1.0
+    mitigation: MOVE
+    ban-eligible: true
   Speed:
     enabled: true
     weight: 1.0
     margin: 0.10                 # vanilla (sprint+bhop) limitlerinin üstüne tolerans
     ice-multiplier: 2.2
+    mitigation: MOVE
+    ban-eligible: true
   Timer:                         # Timer / TickShift / paket patlaması
     enabled: true
     weight: 1.0
     max-credit-ms: 800
     tolerance-ms: 100
+    mitigation: MOVE
+    ban-eligible: true
   NoFall:
     enabled: true
     weight: 1.0
+    mitigation: MOVE
+    ban-eligible: true
   NoSlow:
     enabled: true
     weight: 1.0
     limit: 0.12
+    mitigation: MOVE
+    ban-eligible: true
   Scaffold:
     enabled: true
     weight: 1.0
     rate-per-20-ticks: 14
+    mitigation: PLACE
+    ban-eligible: true
   Criticals:
     enabled: true
     weight: 1.0
+    mitigation: ATTACK
+    ban-eligible: false
   ChestStealer:
     enabled: true
     weight: 1.0
     min-open-ticks: 3
     samples: 12
     min-stddev: 0.3
+    mitigation: CONTAINER
+    ban-eligible: false
   GuiMove:
     enabled: true
     weight: 1.0
+    mitigation: MOVE
+    ban-eligible: false
   Rotation:                      # fare kuantizasyonu (GCD); sinematik kamera/özel istemcilerde yanlış pozitif olabilir
     enabled: true
     weight: 0.4
     window: 40
     min-step: 0.005
+    mitigation: NONE
+    ban-eligible: false
   Phase:
     enabled: true
     weight: 0.6
+    mitigation: MOVE
+    ban-eligible: true
+  Jesus:                         # sıvı yüzeyinde yürüme
+    enabled: true
+    weight: 1.0
+    ticks: 12
+    mitigation: MOVE
+    ban-eligible: true
+  Spider:                        # duvara tırmanma (Fly sapması duvar yanındaysa)
+    enabled: true
+    weight: 1.0
+    mitigation: MOVE
+    ban-eligible: true

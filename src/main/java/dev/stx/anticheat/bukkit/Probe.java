@@ -142,6 +142,27 @@ final class Probe {
         return tick < d.iceUntilTick;
     }
 
+    /** Ayak altı sıvı, ayak bloğu sıvı değil (sıvının ÜSTÜNDE). */
+    static boolean liquidBelow(World w, double x, double y, double z) {
+        Block below = w.getBlockAt(floor(x), floor(y - 0.1), floor(z));
+        Block feet = w.getBlockAt(floor(x), floor(y), floor(z));
+        return below.isLiquid() && !feet.isLiquid();
+    }
+
+    /** Yanda katı blok var mı (Spider: duvara tırmanma). */
+    static boolean nearWall(World w, double x, double y, double z) {
+        double[][] o = {{0.45, 0}, {-0.45, 0}, {0, 0.45}, {0, -0.45}};
+        for (double[] d : o) {
+            int bx = floor(x + d[0]), bz = floor(z + d[1]);
+            if (!w.isChunkLoaded(bx >> 4, bz >> 4)) return false;
+            for (double yo : new double[]{0.5, 1.4}) {
+                Block b = w.getBlockAt(bx, floor(y + yo), bz);
+                if (!b.getType().isAir() && !b.isPassable()) return true;
+            }
+        }
+        return false;
+    }
+
     /** Knockback yönünde 1.2 blokta engel veya tavan var mı? Varsa knockback ölçülmez. */
     static boolean knockbackBlocked(Player p, Vector v) {
         World w = p.getWorld();

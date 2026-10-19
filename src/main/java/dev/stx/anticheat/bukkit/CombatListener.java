@@ -1,6 +1,7 @@
 package dev.stx.anticheat.bukkit;
 
 import dev.stx.anticheat.core.Geometry.Box;
+import dev.stx.anticheat.core.ReachCheck;
 import dev.stx.anticheat.core.Result;
 import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
 import java.util.ArrayList;
@@ -48,10 +49,11 @@ final class CombatListener implements Listener {
     }
 
     /** Varlığa saldırı girişimi (hasarsız olanlar dahil): CPS + vuruş aralığı + Criticals deseni. */
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onAttackAttempt(PrePlayerAttackEntityEvent e) {
         Player p = e.getPlayer();
         PlayerData d = plugin.data(p);
+        if (d.mitActive("ATTACK", System.currentTimeMillis())) { e.setCancelled(true); return; }   // geçici saldırı engeli
         long tick = plugin.tick();
         d.lastAttackTick = tick;
         if (d.bypass || skip(p, d)) return;
@@ -70,11 +72,12 @@ final class CombatListener implements Listener {
     }
 
     /** Doğrulanmış vuruş: Reach, Aim (bakış ışını), Aura (çoklu hedef/snap/duvar). */
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onHit(EntityDamageByEntityEvent e) {
         if (!(e.getDamager() instanceof Player p)) return;
-        if (e.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;     // süpürme/projektil hariç
         PlayerData d = plugin.data(p);
+        if (d.mitActive("ATTACK", System.currentTimeMillis())) { e.setCancelled(true); return; }  // geçici saldırı engeli
+        if (e.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;     // süpürme/projektil hariç
         if (d.bypass || skip(p, d)) return;
         STXConfig cfg = plugin.cfg();
         Entity target = e.getEntity();
@@ -89,6 +92,13 @@ final class CombatListener implements Listener {
 
         Result r = d.reach.onHit(eye.getX(), eye.getY(), eye.getZ(), boxes, allowed);
         if (r != null) plugin.flagger().flag(p, d, "Reach", r);
+        // Anlık engel: ping penceresindeki en yakın konuma bile açıkça ulaşılamıyorsa bu vuruşu iptal et (ihlal sayısından bağımsız)
+        if (cfg.enabled("Reach") && cfg.b("sanctions.mitigation-enabled", true)
+                && ReachCheck.minDistance(eye.getX(), eye.getY(), eye.getZ(), boxes)
+                > allowed + cfg.cd("Reach", "tolerance", 0.30) + cfg.cd("Reach", "cancel-margin", 0.50)) {
+            e.setCancelled(true);
+            return;
+        }
 
         if (!relaxed(d)) {
             r = d.aim.onHit(eye.getX(), eye.getY(), eye.getZ(), eye.getYaw(), eye.getPitch(), boxes, allowed);
@@ -136,6 +146,13 @@ final class CombatListener implements Listener {
             if (d.wallBuf.fail(1))
                 plugin.flagger().flag(p, d, "Aura", Result.of(1.0, "Aura duvar: hedefin 3 noktası da blokla kapalı"));
         } else d.wallBuf.pass();
+    }
+
+    /** Geçici blok yerleştirme engeli (Scaffold müdahalesi). */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPlaceBlock(BlockPlaceEvent e) {
+        PlayerData d = plugin.data(e.getPlayer());
+        if (d.mitActive("PLACE", System.currentTimeMillis())) e.setCancelled(true);
     }
 
     /** Scaffold: yanlış yüz, ışın uyuşmazlığı, yerleştirme hızı. */

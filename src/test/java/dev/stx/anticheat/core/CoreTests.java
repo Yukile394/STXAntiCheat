@@ -4,6 +4,7 @@ import dev.stx.anticheat.core.Geometry.Box;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.UUID;
 
 /** Bağımsız test koşucusu (JUnit gerekmez). Çıkış kodu != 0 ise başarısız test var. */
 public class CoreTests {
@@ -384,23 +385,59 @@ public class CoreTests {
         check(n == 0, "GuiMove: momentum sönümü meşru");
     }
 
-    // ================= POLİTİKA =================
+    // ================= İHLAL DEFTERİ / CEZA BASAMAKLARI / JESUS =================
+    static SanctionPolicy.Rule rule(boolean ban) {
+        return new SanctionPolicy.Rule(ban, 2, 3, 6, 14, 72L * 3600_000, 60_000, 15, 30);
+    }
+
     static void policy() {
-        System.out.println("[Şüphe ve ceza politikası]");
-        PunishPolicy p = new PunishPolicy(new PunishPolicy.Thresholds(10, 25, 50, 2, 8, 60, 90));
-        Suspicion s = new Suspicion(0.2);
-        for (int i = 0; i < 12; i++) s.add("Speed", 1, 0);
-        check(p.decide(s, 0) == PunishPolicy.Action.ALERT, "tek kontrol 12 puan -> yalnızca ALERT");
-        for (int i = 0; i < 40; i++) s.add("Speed", 1, 0);
-        check(p.decide(s, 0) == PunishPolicy.Action.ALERT, "tek kontrol 52 puan -> hâlâ KICK/BAN yok (bağımsız kanıt yok)");
-        for (int i = 0; i < 10; i++) s.add("Fly", 1, 0);
-        check(p.decide(s, 0) == PunishPolicy.Action.BAN, "iki bağımsız kontrol, yüksek toplam -> BAN eşiği");
-        Suspicion s2 = new Suspicion(0.2);
-        for (int i = 0; i < 28; i++) s2.add("Reach", 1, 0);
-        for (int i = 0; i < 2; i++) s2.add("Aim", 1, 0);
-        check(p.decide(s2, 0) == PunishPolicy.Action.ALERT, "30 puan ama yalnızca 1 kontrol >=8: KICK yok");
-        for (int i = 0; i < 6; i++) s2.add("Aim", 1, 0);
-        check(p.decide(s2, 0) == PunishPolicy.Action.KICK, "iki bağımsız kontrol + 25+ puan -> KICK");
-        check(p.decide(s2, 600_000) == PunishPolicy.Action.NONE, "10 dk sonra puanlar sönmüş");
+        System.out.println("[İhlal defteri / basamaklar / kalıcılık]");
+        var r = rule(true);
+        check(SanctionPolicy.level(3, r) == SanctionPolicy.Level.LOW, "düşük puan = LOW (yalnızca kayıt)");
+        check(SanctionPolicy.stage(SanctionPolicy.Level.LOW, 5, r, 3, 2) == SanctionPolicy.Stage.LOG, "LOW kanıtta ihlal sayısı kaç olursa olsun LOG");
+        check(SanctionPolicy.level(8, r) == SanctionPolicy.Level.MEDIUM && SanctionPolicy.level(20, r) == SanctionPolicy.Level.HIGH, "MEDIUM/HIGH eşikleri");
+        check(SanctionPolicy.stage(SanctionPolicy.Level.MEDIUM, 1, r, 1, 2) == SanctionPolicy.Stage.WARN_MITIGATE, "1. ihlal -> geçici müdahale (1/3)");
+        check(SanctionPolicy.stage(SanctionPolicy.Level.MEDIUM, 2, r, 1, 2) == SanctionPolicy.Stage.RESTRICT, "2. ihlal -> kısıtlama (2/3)");
+        check(SanctionPolicy.stage(SanctionPolicy.Level.MEDIUM, 3, r, 3, 2) == SanctionPolicy.Stage.RESTRICT, "3. ihlal ama kanıt yalnızca MEDIUM -> BAN YOK");
+        check(SanctionPolicy.stage(SanctionPolicy.Level.HIGH, 3, r, 1, 2) == SanctionPolicy.Stage.RESTRICT, "3. ihlal, HIGH ama tek hile türü -> BAN YOK");
+        check(SanctionPolicy.stage(SanctionPolicy.Level.HIGH, 3, rule(false), 3, 2) == SanctionPolicy.Stage.RESTRICT, "ban-uygun olmayan hile (AutoClicker vb.) asla BAN");
+        check(SanctionPolicy.stage(SanctionPolicy.Level.HIGH, 3, r, 2, 2) == SanctionPolicy.Stage.BAN, "3 ihlal + HIGH + 2 bağımsız hile türü -> BAN");
+
+        UUID id = UUID.randomUUID();
+        long exp = r.expireMs(), t0 = 1_000_000_000L;
+        ViolationLedger l = new ViolationLedger();
+        check(l.record(id, "Ali", "Fly", t0, exp) == 1, "ilk ihlal = 1");
+        check(l.record(id, "Ali", "Fly", t0 + 120_000, exp) == 2, "ikinci ihlal = 2");
+        check(l.record(id, "Ali", "Reach", t0 + 130_000, exp) == 1, "farklı hile türü ayrı sayaç");
+        ViolationLedger copy = new ViolationLedger();
+        copy.load(l.serialize(t0 + 130_000, exp));
+        check(copy.count(id, "Fly", t0 + 130_000 + exp + 1, exp) == 0, "süre dolunca ihlaller sayılmaz (yanlış pozitif birikmesi yok)");
+
+        // çıkış-giriş / sunucu yeniden başlatma: serileştir -> yeni defter -> yükle
+        l.setMitigation(id, "ATTACK", t0 + 600_000);
+        String saved = l.serialize(t0 + 200_000, exp);
+        ViolationLedger l2 = new ViolationLedger();
+        check(l2.load(saved) == 0, "kayıt dosyası hatasız yüklendi");
+        check(l2.count(id, "Fly", t0 + 200_000, exp) == 2 && l2.count(id, "Reach", t0 + 200_000, exp) == 1,
+                "yeniden başlatma sonrası sayaçlar korundu (UUID bazlı)");
+        check(l2.mitigations(id, t0 + 200_000).containsKey("ATTACK"), "yeniden girişte aktif kısıtlama korundu (kaçış yok)");
+        check(l2.mitigations(id, t0 + 700_000).isEmpty(), "süresi biten kısıtlama kalkar");
+        check(l2.distinctChecks(id, t0 + 200_000, k -> exp) == 2, "bağımsız hile türü sayısı");
+        ViolationLedger l3 = new ViolationLedger();
+        check(l3.load("bozuk satır\nV|not-a-uuid|x|y|1\nV|" + id + "|Ali|Fly|abc\n") == 3, "bozuk kayıtlar atlanır, çökmez");
+
+        Jesus();
+    }
+
+    static void Jesus() {
+        JesusCheck j = new JesusCheck(12); int n = 0;
+        for (int i = 0; i < 60; i++) if (j.onMove(true, 0.0, 0.2, false) != null) n++;
+        check(n > 0, "Jesus: suyun üstünde yürüme tespit");
+        j = new JesusCheck(12); n = 0;
+        for (int i = 0; i < 200; i++) if (j.onMove(i % 8 != 0, i % 3 == 0 ? 0.0 : 0.3, 0.2, false) != null) n++;
+        check(n == 0, "Jesus: zıplayarak/kesintili yüzey teması meşru");
+        j = new JesusCheck(12); n = 0;
+        for (int i = 0; i < 60; i++) if (j.onMove(true, 0.0, 0.2, true) != null) n++;
+        check(n == 0, "Jesus: muaf oyuncu");
     }
 }

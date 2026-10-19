@@ -33,13 +33,19 @@ final class StxCommand implements CommandExecutor, TabCompleter {
                 PlayerData d = t == null ? null : plugin.peek(t.getUniqueId());
                 if (d == null) { msg(s, "Oyuncu bulunamadı."); return true; }
                 long now = System.currentTimeMillis();
-                msg(s, String.format(Locale.ROOT, "&f%s &7toplam=&e%.1f &7bağımsız=&e%d &7ping=&e%d &7tps=&e%.1f",
-                        t.getName(), d.suspicion.total(now),
-                        d.suspicion.distinct(plugin.cfg().d("punishment.distinct-min-points", 6), now), t.getPing(), plugin.tps()));
+                msg(s, String.format(Locale.ROOT, "&f%s &7toplam puan=&e%.1f &7ping=&e%d &7tps=&e%.1f",
+                        t.getName(), d.suspicion.total(now), t.getPing(), plugin.tps()));
                 Map<String, Double> snap = d.suspicion.snapshot(now);
-                msg(s, snap.isEmpty() ? "Şüphe puanı yok." : snap.toString());
-                msg(s, "Karar: &e" + plugin.policy().decide(d.suspicion, now)
-                        + " &7| Ceza aktif: " + (plugin.cfg().punishmentActive() ? "&cEVET" : "&aHAYIR"));
+                msg(s, snap.isEmpty() ? "Şüphe puanı yok." : "Puanlar: " + snap);
+                StringBuilder vs = new StringBuilder();
+                for (String ck : plugin.checkNames()) {
+                    var rule = plugin.cfg().rule(ck);
+                    int n = plugin.ledger().count(t.getUniqueId(), ck, now, rule.expireMs());
+                    if (n > 0) vs.append(ck).append('=').append(n).append(rule.banEligible() ? "/" + rule.violationsToBan() : "").append(' ');
+                }
+                msg(s, vs.length() == 0 ? "Kalıcı ihlal yok." : "İhlaller: &e" + vs);
+                msg(s, "Aktif müdahale: &e" + (d.mitUntil.entrySet().stream().filter(x -> x.getValue() > now).map(x -> x.getKey() + " " + (x.getValue() - now) / 1000 + "sn").toList())
+                        + " &7| Ban: " + (plugin.cfg().banActive() ? "&cAÇIK" : "&aKİLİTLİ"));
             }
             case "history" -> msg(s, "Kayıtlar: plugins/STXAntiCheat/logs/stx-<tarih>.jsonl (alanlar: check, detail, ping, tps, history)");
             case "exempt" -> {
@@ -58,8 +64,11 @@ final class StxCommand implements CommandExecutor, TabCompleter {
                 PlayerData d = t == null ? null : plugin.peek(t.getUniqueId());
                 if (d == null) { msg(s, "Oyuncu bulunamadı."); return true; }
                 d.suspicion.clear();
+                d.mitUntil.clear();
+                plugin.ledger().clear(t.getUniqueId());
+                plugin.markDirty();
                 d.build(plugin.cfg());
-                msg(s, t.getName() + " şüphe puanları sıfırlandı.");
+                msg(s, t.getName() + " için puanlar, kalıcı ihlaller ve kısıtlamalar sıfırlandı (yanlış pozitif düzeltme).");
             }
             case "reload" -> { plugin.reloadAll(); msg(s, "Yapılandırma yeniden yüklendi."); }
             default -> {
