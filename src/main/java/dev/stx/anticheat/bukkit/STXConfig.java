@@ -37,9 +37,18 @@ public final class STXConfig {
                 (int) sd(check, "mitigation-seconds", 15), (int) sd(check, "restrict-seconds", 30));
     }
 
-    /** ATTACK, MOVE, PLACE, CONTAINER veya NONE */
+    /** ATTACK, MOVE, PLACE, CONTAINER, ELYTRA veya NONE; birden fazla için "ELYTRA+ATTACK" */
+    public List<String> mitigationTypes(String check) {
+        String raw = c.getString("checks." + check + ".mitigation", "NONE").toUpperCase(java.util.Locale.ROOT);
+        List<String> out = new java.util.ArrayList<>();
+        for (String t : raw.split("[+,]")) if (!t.isBlank() && !t.trim().equals("NONE")) out.add(t.trim());
+        return out;
+    }
+
+    /** İlk (ana) müdahale türü; yoksa NONE. */
     public String mitigationType(String check) {
-        return c.getString("checks." + check + ".mitigation", "NONE").toUpperCase(java.util.Locale.ROOT);
+        List<String> l = mitigationTypes(check);
+        return l.isEmpty() ? "NONE" : l.get(0);
     }
 
     public boolean banActive() { return b("sanctions.ban-enabled", true); }

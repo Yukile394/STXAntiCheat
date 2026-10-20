@@ -6,6 +6,8 @@ import java.util.function.BooleanSupplier;
 public final class NoFallCheck {
     private double fall, lastDy;
     private int skip;
+
+    public void setHot(boolean h) { groundBuf.setScale(h ? 0.5 : 1.0); desyncBuf.setScale(h ? 0.5 : 1.0); }
     private final FlagBuffer groundBuf = new FlagBuffer(3, 0.5);
     private final FlagBuffer desyncBuf = new FlagBuffer(3, 0.5);
 

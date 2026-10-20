@@ -26,6 +26,11 @@ public final class PlayerData {
     public AimCheck aim;
     public AuraCheck aura;
     public AimAssistCheck aimAssist;
+    public ElytraCheck elytra;
+    public ElytraHitCheck elytraHit;
+    public RocketCadenceCheck rocket;
+    public TrackingCheck tracking;
+    public SnapShapeCheck snapShape;
     public ClickCheck click;
     public RotationCheck rotation;
     public ScaffoldCheck scaffold;
@@ -54,6 +59,11 @@ public final class PlayerData {
     /** Aktif geçici müdahaleler: tür (ATTACK/MOVE/PLACE/CONTAINER) -> bitiş (duvar saati ms). */
     public final Map<String, Long> mitUntil = new HashMap<>();
     public boolean selfSetback, setbackQueued, hasGood;
+    /** Hareket hilesinden yakalandıktan sonra bu zamana kadar "hot": aynı hileye çok daha hızlı tepki, hepsi anında geri alınır. */
+    public long moveHotUntilMs, moveGraceUntilTick, boostUntilTick, combatTargetTick = -100000, lastMoveMs;
+    public java.util.UUID combatTarget;
+    public double lastBearing;
+    public boolean hasBearing, hotApplied;
     public long lastSetbackMs;
     public World goodWorld;
     public double goodX, goodY, goodZ;
@@ -96,9 +106,21 @@ public final class PlayerData {
         rotation = new RotationCheck(c.ci("Rotation", "window", 40), c.cd("Rotation", "min-step", 0.005));
         scaffold = new ScaffoldCheck(c.ci("Scaffold", "rate-per-20-ticks", 14));
         criticals = new CriticalsCheck();
+        elytra = new ElytraCheck();
+        elytraHit = new ElytraHitCheck(c.cd("ElytraTarget", "locked-degrees", 1.8), c.ci("ElytraTarget", "window", 6), c.ci("ElytraTarget", "need", 4));
+        rocket = new RocketCadenceCheck(c.ci("ElytraTarget", "rocket-samples", 6), c.cd("ElytraTarget", "rocket-max-stddev-ticks", 2.5));
+        tracking = new TrackingCheck(c.ci("Aura", "tracking-window", 60), c.cd("Aura", "tracking-min-on-target", 0.985), c.cd("Aura", "tracking-min-bearing", 2.0));
+        snapShape = new SnapShapeCheck(c.cd("Aura", "snap-degrees", 35), c.ci("Aura", "snap-count", 5), c.ci("Aura", "snap-window-ticks", 80));
         jesus = new JesusCheck(c.ci("Jesus", "ticks", 12));
         window = new WindowCheck(c.ci("ChestStealer", "min-open-ticks", 3), c.ci("ChestStealer", "samples", 12),
                 c.cd("ChestStealer", "min-stddev", 0.3));
+    }
+
+    /** Hot mod: tüm hareket kontrollerini hassaslaştırır / geri alır. Yalnızca durum değişince çalışır. */
+    public void setHot(boolean h) {
+        if (h == hotApplied) return;
+        hotApplied = h;
+        air.setHot(h); speed.setHot(h); noFall.setHot(h); noSlow.setHot(h); elytra.setHot(h);
     }
 
     public void grace(long untilTick) { graceUntilTick = Math.max(graceUntilTick, untilTick); }
@@ -128,6 +150,7 @@ public final class PlayerData {
     /** Teleport/dünya değişimi sonrası referansları sıfırla. */
     public void resetMotionState() {
         hasLast = false;
+        elytra.reset(); tracking.reset(); snapShape.reset(); hasBearing = false; hotApplied = false;
         timer.reset();
         velocity.cancel();
         rotation.reset();

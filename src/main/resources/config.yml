@@ -57,7 +57,9 @@ sanctions:
     enabled: true
     min-points: 2                # kontrolün puanı bu değere ulaşınca (en az 2 kanıt) devreye girer
     block-seconds: 3             # saldırı / blok koyma / konteyner engeli süresi
-    move-freeze-seconds: 2       # hareket dondurma süresi (yerinden oynayamaz, yukarı çıkamaz)
+    move-freeze-seconds: 3       # hareket dondurma süresi (yerinden oynayamaz, yukarı çıkamaz)
+    hot-seconds: 30              # yakalanan hareket hilesinde bu süre boyunca "hot": buffer %66 küçülür, her ihlal anında geri alınır
+                                 # (hile açıkken sürekli geri alınır; 3-4 sn serbest kullanım kalmaz)
   default:
     confirm-points: 6            # ihlal sayılması için kontrol puanı (MEDIUM)
     strong-points: 14            # güçlü kanıt (HIGH) – ban için gerekli
@@ -103,6 +105,14 @@ checks:
     flick-degrees: 60
     wall-check: true             # HER vuruşta duvar kontrolü; kapalıysa vuruş anında iptal edilir
     angle-cancel-degrees: 70     # bakış hedeften bu kadar saparsa vuruş anında iptal
+    tracking-window: 60          # açık alan: strafe eden oyuncu hedefte kros-hair kalıcılığı (tik)
+    tracking-min-on-target: 0.985
+    tracking-min-bearing: 2.0    # hedefin açısal hızı (derece/tik); düz kovalamada sayılmaz
+    snap-degrees: 35             # izole rotasyon snap'i (öncesi/sonrası sabit) eşiği
+    snap-count: 5
+    snap-window-ticks: 80
+    confirm-points: 4            # Aura için daha hassas
+    strong-points: 10
     mitigation: ATTACK
     ban-eligible: true
     instant: true
@@ -237,3 +247,36 @@ checks:
     mitigation: ATTACK
     ban-eligible: false
     instant: false
+  ElytraSpeed:                   # elytra fiziği: ElytraPlus sabit hız, boost, hız çarpanı. Vanilla elytra formülüyle doğrulanır.
+    enabled: true
+    weight: 1.5
+    mitigation: ELYTRA+ATTACK    # elytra kapatılır (uçuş bitirilir/başlatılamaz) + saldırı engeli
+    ban-eligible: true
+    instant: true
+    confirm-points: 3            # 1 kanıt = 1/2
+    strong-points: 3             # (MEDIUM = HIGH) 2. ihlalde 2/2 DOĞRUDAN BAN
+    violations-to-restrict: 1
+    violations-to-ban: 2
+    expire-hours: 168
+    violation-cooldown-seconds: 15
+    mitigation-seconds: 30
+    restrict-seconds: 60
+  ElytraTarget:                  # elytra + hedefe kilitli vuruş / dön-vur-geri dön / otomatik roket
+    enabled: true
+    weight: 1.5
+    locked-degrees: 1.8          # hedef gözüne/merkezine bu kadar yakın nişan "kilitli" sayılır
+    window: 6
+    need: 4                      # son 6 elytra vuruşunun 4'ü kilitliyse kanıt
+    rocket-samples: 6
+    rocket-max-stddev-ticks: 2.5
+    mitigation: ELYTRA+ATTACK
+    ban-eligible: true
+    instant: true
+    confirm-points: 3
+    strong-points: 3
+    violations-to-restrict: 1
+    violations-to-ban: 2
+    expire-hours: 168
+    violation-cooldown-seconds: 15
+    mitigation-seconds: 30
+    restrict-seconds: 60

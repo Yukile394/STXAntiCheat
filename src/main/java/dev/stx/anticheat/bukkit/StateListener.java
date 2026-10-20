@@ -26,9 +26,16 @@ final class StateListener implements Listener {
 
     StateListener(STXAntiCheat plugin) { this.plugin = plugin; }
 
+    /** Genel tolerans (hareket + savaş). */
     private void grace(Player p, String key, int def) {
         PlayerData d = plugin.data(p);
         d.grace(plugin.tick() + plugin.cfg().i(key, def));
+    }
+
+    /** Yalnızca hareket kontrolleri için tolerans (savaş geometri kontrolleri açık kalır). */
+    private void moveGrace(Player p, String key, int def) {
+        PlayerData d = plugin.data(p);
+        d.moveGraceUntilTick = Math.max(d.moveGraceUntilTick, plugin.tick() + plugin.cfg().i(key, def));
     }
 
     /** Süreli (7 gün) ban: sunucu yeniden başlasa da, isim değişse de UUID ile engeller. */
@@ -73,18 +80,30 @@ final class StateListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onGameMode(PlayerGameModeChangeEvent e) { grace(e.getPlayer(), "safety.gamemode-grace-ticks", 40); }
+    public void onGameMode(PlayerGameModeChangeEvent e) { moveGrace(e.getPlayer(), "safety.gamemode-grace-ticks", 40); }
 
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onFlight(PlayerToggleFlightEvent e) { grace(e.getPlayer(), "safety.flight-toggle-grace-ticks", 80); }
+    public void onFlight(PlayerToggleFlightEvent e) { moveGrace(e.getPlayer(), "safety.flight-toggle-grace-ticks", 80); }
 
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onGlide(EntityToggleGlideEvent e) {
-        if (e.getEntity() instanceof Player p) grace(p, "safety.glide-end-grace-ticks", 40);
+    /** Elytra kısıtı aktifken (ElytraTarget/ElytraSpeed müdahalesi) uçuşa başlamak engellenir. */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onGlideBlock(EntityToggleGlideEvent e) {
+        if (!(e.getEntity() instanceof Player p) || !e.isGliding()) return;
+        PlayerData d = plugin.peek(p.getUniqueId());
+        if (d != null && d.mitActive("ELYTRA", System.currentTimeMillis())) e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onRiptide(PlayerRiptideEvent e) { grace(e.getPlayer(), "safety.riptide-grace-ticks", 60); }
+    public void onGlide(EntityToggleGlideEvent e) {
+        if (e.getEntity() instanceof Player p) {
+            PlayerData d = plugin.data(p);
+            d.moveGraceUntilTick = Math.max(d.moveGraceUntilTick, plugin.tick() + plugin.cfg().i("safety.glide-end-grace-ticks", 40));
+            d.elytra.reset();
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRiptide(PlayerRiptideEvent e) { moveGrace(e.getPlayer(), "safety.riptide-grace-ticks", 60); }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onBedLeave(PlayerBedLeaveEvent e) { grace(e.getPlayer(), "safety.teleport-grace-ticks", 30); }

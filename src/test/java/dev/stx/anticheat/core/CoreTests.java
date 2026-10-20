@@ -44,6 +44,7 @@ public class CoreTests {
         rotation();
         scaffoldCriticalsWindow();
         policy();
+        newChecks();
         System.out.println("\n== " + passed + " geçti, " + failed + " başarısız ==");
         System.exit(failed == 0 ? 0 : 1);
     }
@@ -466,5 +467,113 @@ public class CoreTests {
         j = new JesusCheck(12); n = 0;
         for (int i = 0; i < 60; i++) if (j.onMove(true, 0.0, 0.2, true) != null) n++;
         check(n == 0, "Jesus: muaf oyuncu");
+    }
+
+    // ================= ELYTRA / AÇIK ALAN AURA / HOT MOD =================
+    /** Vanilla elytra simülasyonu; boost=true iken roket (travel öncesi) uygulanır. @return hile türüne göre kanıt sayısı */
+    static int elytraRun(int mode, boolean withBoost, long seed) {
+        Random r = new Random(seed);
+        double vx = 0, vy = 0, vz = 0.6; float yaw = 0, pitch = 10, ty = 0, tp = 10;
+        ElytraCheck ec = new ElytraCheck(); int n = 0;
+        for (int i = 0; i < 4000; i++) {
+            if (i % 97 == 0) ty = r.nextInt(360) - 180;
+            if (i % 53 == 0) tp = r.nextInt(100) - 30;
+            yaw += (float) Math.max(-14, Math.min(14, Geometry.wrapDegrees(ty - yaw)));
+            pitch += Math.max(-6, Math.min(6, tp - pitch));
+            double[] look = Geometry.look(yaw, pitch);
+            boolean boost = withBoost && (i % 200) < 40;
+            if (boost) { vx += look[0] * 0.1 + (look[0] * 1.5 - vx) * 0.5; vy += look[1] * 0.1 + (look[1] * 1.5 - vy) * 0.5; vz += look[2] * 0.1 + (look[2] * 1.5 - vz) * 0.5; }
+            double[] p = new double[3];
+            ElytraCheck.predict(vx, vy, vz, pitch, look, p);
+            double mul = mode == 2 ? 1.35 : 1.0;              // 2: hız çarpanı hilesi
+            vx = p[0] * mul; vy = p[1] * mul; vz = p[2] * mul;
+            if (mode == 1) {                                  // 1: ElytraPlus sabit hız (XZ 1.55, Y 0.47)
+                double yr = Math.toRadians(yaw);
+                vx = -Math.sin(yr) * 1.55; vz = Math.cos(yr) * 1.55; vy = 0.47;
+            }
+            if (ec.onMove(vx, vy, vz, yaw, pitch, boost, false, 50) != null) n++;
+        }
+        return n;
+    }
+
+    static void newChecks() {
+        System.out.println("[Elytra / ElytraTarget]");
+        int legit = 0; for (long sd = 1; sd <= 5; sd++) legit += elytraRun(0, false, sd);
+        check(legit == 0, "vanilla elytra uçuşu (dalış/tırmanış/keskin dönüş) 20000 tik: 0 kanıt");
+        legit = 0; for (long sd = 1; sd <= 5; sd++) legit += elytraRun(0, true, sd);
+        check(legit == 0, "vanilla elytra + havai fişek boost'ları: 0 kanıt");
+        check(elytraRun(1, false, 9) > 0, "ElytraPlus sabit hız (XZ 1.55, Y 0.47) tespit");
+        check(elytraRun(2, false, 9) > 0, "elytra hız çarpanı 1.35x tespit");
+        ElytraCheck lag = new ElytraCheck(); int ln = 0;
+        for (int i = 0; i < 5; i++) lag.onMove(0, 0, 0.5, 0, 10, false, false, 50);
+        if (lag.onMove(0, 0, 9.0, 0, 10, false, false, 900) != null) ln++;      // lag boşluğundan sonra büyük sıçrama
+        check(ln == 0, "büyük lag boşluğundan sonraki ilk paket değerlendirilmez");
+
+        ElytraHitCheck eh = new ElytraHitCheck(1.8, 6, 4); int en = 0; Random r = new Random(4);
+        for (int i = 0; i < 600; i++) if (eh.onHit(true, false, 3 + r.nextDouble() * 8) != null) en++;
+        check(en == 0, "elytra ile insan nişanı (3–11° sapma) kanıt üretmiyor");
+        eh = new ElytraHitCheck(1.8, 6, 4); en = 0;
+        for (int i = 0; i < 30; i++) if (eh.onHit(true, false, 0.3 + r.nextDouble() * 0.8) != null) en++;
+        check(en > 0, "elytra ile hedef gözüne milimetrik kilit tespit");
+        eh = new ElytraHitCheck(1.8, 6, 4); en = 0;
+        for (int i = 0; i < 30; i++) if (eh.onHit(true, true, 20) != null) en++;
+        check(en > 0, "elytra: dön–vur–geri dön (alternate look) tespit");
+        eh = new ElytraHitCheck(1.8, 6, 4); en = 0;
+        for (int i = 0; i < 30; i++) if (eh.onHit(false, true, 0.1) != null) en++;
+        check(en == 0, "yerdeki oyuncu için ElytraTarget kontrolü çalışmaz");
+
+        RocketCadenceCheck rc = new RocketCadenceCheck(6, 2.5); int rn = 0; long t = 0;
+        for (int i = 0; i < 40; i++) { t += 31 + (i % 2); if (rc.onUse(t) != null) rn++; }
+        check(rn > 0, "otomatik roket (~1.5 sn ritmik) tespit");
+        rc = new RocketCadenceCheck(6, 2.5); rn = 0; t = 0;
+        for (int i = 0; i < 300; i++) { t += 25 + r.nextInt(70); if (rc.onUse(t) != null) rn++; }
+        check(rn == 0, "insan roket kullanımı (düzensiz) kanıt üretmiyor");
+
+        System.out.println("[Açık alan Aura]");
+        TrackingCheck tc = new TrackingCheck(60, 0.985, 2.0); int tn = 0;
+        for (int i = 0; i < 6000; i++) if (tc.onTick(true, r.nextDouble() < 0.78, 3 + r.nextDouble() * 4) != null) tn++;
+        check(tn == 0, "insan takibi (strafe eden hedefte %78 kros-hair) kanıt üretmiyor");
+        tc = new TrackingCheck(60, 0.985, 2.0); tn = 0;
+        for (int i = 0; i < 600; i++) if (tc.onTick(true, true, 4.0) != null) tn++;
+        check(tn > 0, "strafe eden hedefte %100 kilit (Aura Track) tespit");
+        tc = new TrackingCheck(60, 0.985, 2.0); tn = 0;
+        for (int i = 0; i < 600; i++) if (tc.onTick(true, true, 0.2) != null) tn++;
+        check(tn == 0, "düz kovalanan hedefte %100 kros-hair meşru (açısal hız ~0)");
+
+        SnapShapeCheck ss = new SnapShapeCheck(35, 4, 100); int sn = 0; long tk = 0;
+        for (int i = 0; i < 12; i++) {
+            if (ss.onRotation(tk += 2, 0.3, 0.1) != null) sn++;
+            if (ss.onRotation(tk += 1, 62, 5) != null) sn++;                 // izole snap
+            if (ss.onRotation(tk += 1, 0.4, 0.2) != null) sn++;
+            if (ss.onRotation(tk += 8, 0.3, 0.0) != null) sn++;
+        }
+        check(sn > 0, "izole rotasyon snap'leri (Aura Track/vuruş snap) tespit");
+        ss = new SnapShapeCheck(35, 4, 100); sn = 0; tk = 0;
+        double[][] flick = {{3, 1}, {14, 3}, {46, 6}, {31, 4}, {9, 2}, {2, 0.5}};   // insan flick'i: rampalı
+        for (int i = 0; i < 60; i++) for (double[] f : flick) if (ss.onRotation(tk += 1, f[0], f[1]) != null) sn++;
+        check(sn == 0, "insan flick'i (rampalı dönüş) kanıt üretmiyor");
+
+        System.out.println("[Hot mod / NoSlow]");
+        SpeedCheck n1 = new SpeedCheck(0.10, 2.2), n2 = new SpeedCheck(0.10, 2.2); n2.setHot(true);
+        int first1 = -1, first2 = -1;
+        for (int i = 1; i <= 8; i++) {
+            if (first1 < 0 && n1.onMove(ms(i, 0, 0, 0.45, true)) != null) first1 = i;
+            if (first2 < 0 && n2.onMove(ms(i, 0, 0, 0.45, true)) != null) first2 = i;
+        }
+        check(first2 > 0 && first2 < first1, "hot modda Speed daha erken yakalanır (normal=" + first1 + ". tik, hot=" + first2 + ". tik)");
+        SpeedCheck n3 = new SpeedCheck(0.10, 2.2); n3.setHot(true); int hn = 0;
+        for (VanillaSim sim = new VanillaSim(); sim.tick < 600; ) if (n3.onMove(sim.step(true, true, 1.0, 1.0)) != null) hn++;
+        check(hn == 0, "hot modda bile meşru sprint+bhop kanıt üretmiyor");
+        AirCheck a1 = new AirCheck(), a2 = new AirCheck(); a2.setHot(true); int h1 = -1, h2 = -1;
+        a1.onMove(ms(0, 0, 0, 0.2, true)); a2.onMove(ms(0, 0, 0, 0.2, true));
+        a1.onMove(ms(1, 0, 0.42, 0.2, false)); a2.onMove(ms(1, 0, 0.42, 0.2, false));
+        for (int i = 2; i < 40; i++) {
+            if (h1 < 0 && a1.onMove(ms(i, 0, 0, 0.2, false)) != null) h1 = i;
+            if (h2 < 0 && a2.onMove(ms(i, 0, 0, 0.2, false)) != null) h2 = i;
+        }
+        check(h2 > 0 && h2 < h1, "hot modda Fly/Hover daha erken yakalanır");
+        NoSlowCheck ns = new NoSlowCheck(0.12); int nsn = 0; double sp = 0.6;
+        for (int i = 0; i < 40; i++) { sp *= 0.91; if (ns.onMove(withUsing(ms(i, 0, 0.0, sp, false), true)) != null) nsn++; }
+        check(nsn == 0, "NoSlow: havada (bunny-hop momentumu) yemek yemek meşru");
     }
 }

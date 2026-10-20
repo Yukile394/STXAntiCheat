@@ -14,10 +14,11 @@ public final class AirCheck {
     private int airTicks, skip, hover;
     private double rise;
 
-    private final FlagBuffer flyBuf = new FlagBuffer(4, 0.5);
-    private final FlagBuffer fallBuf = new FlagBuffer(4, 0.5);
+    private final FlagBuffer flyBuf = new FlagBuffer(3, 0.5);
+    private final FlagBuffer fallBuf = new FlagBuffer(3, 0.5);
     private final FlagBuffer stepBuf = new FlagBuffer(2, 0.5);
     private final int hoverTicks;
+    private boolean hot;
     private final double maxRise;
 
     public AirCheck(int hoverTicks, double maxRise) {
@@ -26,6 +27,14 @@ public final class AirCheck {
     }
 
     public AirCheck() { this(8, 1.32); }
+
+    /** Hot mod: oyuncu az önce hareket hilesinden yakalandı; aynı hileye çok daha hızlı tepki ver. */
+    public void setHot(boolean h) {
+        hot = h;
+        flyBuf.setScale(h ? 0.34 : 1.0);
+        fallBuf.setScale(h ? 0.34 : 1.0);
+        stepBuf.setScale(h ? 0.5 : 1.0);
+    }
 
     private void resetState(MoveSample s) {
         prevGround = s.standing();
@@ -76,7 +85,7 @@ public final class AirCheck {
             }
             if (s.dy() > 0) rise += s.dy();
             hover = Math.abs(s.dy()) < 0.02 ? hover + 1 : 0;
-            if (r == null && hover >= hoverTicks) {
+            if (r == null && hover >= (hot ? Math.max(3, hoverTicks / 2) : hoverTicks)) {
                 r = Result.of(1.0, "Hover " + hover + " tik havada sabit");
                 hover = 0;
             }

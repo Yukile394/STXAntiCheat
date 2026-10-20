@@ -6,7 +6,7 @@ bu yüzden 1.21.x sürümleri arasında yeniden derleme gerektirmesi beklenmez.
 ## Derleme
 Yerelde (Java 21 gerekir; Gradle ayrıca kurmanız gerekmez, `gradlew` 8.10'u kendisi indirir):
 ```
-./gradlew build         # build/libs/STXAntiCheat-1.0.0.jar  (+ 96 çekirdek test)
+./gradlew build         # build/libs/STXAntiCheat-1.0.0.jar  (+ 126 çekirdek test)
 ./gradlew coreTests     # yalnızca tespit mantığı testleri
 ```
 Windows'ta `gradlew.bat build`. JAR'ı sunucunun `plugins/` klasörüne atın.
@@ -42,9 +42,27 @@ AutoClicker, Criticals, ChestStealer, GuiMove, Velocity, Rotation, AimAssist **b
 Çıkıp girme: girişte kontroller sıfırdan kurulur, ihlaller ve bitmemiş kısıtlar defterden geri yüklenir. Dünya değişimi,
 respawn, teleport ve kendi geri-ışınlamamız için ayrı kısa tolerans vardır. Defter periyodik (asenkron, atomik) ve kapanışta kaydedilir.
 
+## Hot mod (hile açıkken sürekli engel)
+Bir hareket hilesi (Fly/Speed/Step/Jesus/NoSlow/...) yakalanınca oyuncu **30 sn "hot" moda** girer: tüm hareket kontrollerinin
+tamponu ~%66 küçülür, Speed toleransı daralır; hot iken her yeni kanıt anında son temiz konuma geri alma + 3 sn dondurma getirir.
+Böylece hile açık kaldıkça sürekli geri alınır, "engellendikten sonra 3-4 sn kullanım" kalmaz. Meşru oyuncu hot modda da
+yanlış pozitif vermez (testle doğrulandı). NoSlow yalnızca yerde değerlendirilir (havadaki bunny-hop momentumu meşru).
+
+## Elytra / ElytraTarget
+- **ElytraSpeed:** vanilla elytra formülü (önceki hız + bakış → sonraki hız) ile her tik tahmin; fazlalık tek yönlü ve birikimli sayılır
+  (ElytraPlus sabit hız/boost/çarpan). Roket (havai fişek) pencereleri ayrı: hız tavanı + hız yönü bakışa yakınsamalı. Lag boşluğu,
+  knockback ve sıvıda değerlendirme yapılmaz. Vanilla simülasyonunda 20 000+ tikte 0 yanlış pozitif.
+- **ElytraTarget:** elytra ile vuruşlarda hedef gözüne/merkezine milimetrik kilit, "ileri bak–vuruş tikinde snap–geri dön" ve savaşta
+  makine ritminde otomatik roket tespiti.
+- **Ceza: 1/2 → elytra kapatılır (uçuş bitirilir, 60 sn tekrar başlatılamaz) + saldırı engeli; 2/2 → doğrudan 7 gün ban.**
+  (`checks.ElytraSpeed/ElytraTarget` altında ayarlanır.)
+
 ## Aura / saldırı tespiti
 Her vuruşta: (1) hedefin ping geçmişindeki **tüm** konumlarına 5 noktalı duvar ışını, (2) bakış–hedef açısı, (3) Reach, (4) bakış ışını–hitbox,
 (5) AimAssist (nişanın hedef merkezine fazla kilitli/tutarlı olması), (6) çoklu hedef, keskin dönüş ve **sessiz rotasyon** (dön–vur–geri dön).
+**Açık alan:** (7) strafe eden oyuncu hedefte kros-hair'in hitbox üzerinde kalma oranı (Aura Track ~%100, insan çok daha düşük;
+düz kovalamada sayılmaz), (8) **rotasyon şekli**: tek tikte büyük izole snap (insan dönüşü rampalıdır). Bu ikisi Aura'nın GCD
+düzeltmesinden (gcdFix) etkilenmez. Elytra'dayken savaş kontrolleri muaf tutulmaz.
 Duvar ve açı kontrolleri TPS düşüşünde kapanmaz (yalnızca muafiyet ve ping > 700 ms'de atlanır).
 
 ## OP bildirimleri
@@ -100,7 +118,7 @@ Bu düzeltme koddan türetildi; gerçek sunucuda bataklıkta doğrulayın.
 - Folia desteklenmez.
 
 ## Test durumu
-- Çekirdek mantık (`core/`): **106 otomatik test geçiyor** (ihlal defteri kalıcılığı/relog, ceza basamakları ve ban kilitleri, Jesus dahil); meşru yürüme/sprint/bunny-hop/düşme/knockback/lag
+- Çekirdek mantık (`core/`): **126 otomatik test geçiyor** (ihlal defteri kalıcılığı/relog, ceza basamakları ve ban kilitleri, Jesus dahil); meşru yürüme/sprint/bunny-hop/düşme/knockback/lag
   senaryolarında 0 kanıt, hile senaryolarında tespit.
 - Paper adaptörü (`bukkit/`): gerçek Paper API'si ile **derlenmedi ve canlı sunucuda denenmedi**
   (geliştirme ortamında API indirilemedi; yalnızca kendi stub'larımla iç tutarlılık denendi). İlk `./gradlew build`

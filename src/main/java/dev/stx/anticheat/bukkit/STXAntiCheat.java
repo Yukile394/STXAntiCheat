@@ -141,8 +141,25 @@ public final class STXAntiCheat extends JavaPlugin {
         return tick < d.pingGraceUntilTick;
     }
 
-    /** Sert muafiyet nedeni; null = muaf değil. */
+    /**
+     * Savaş kontrolleri için muafiyet: elytra ve hareket-toleransları (uçuş açma/glide bitişi) muaf TUTMAZ;
+     * böylece elytra ile Aura/ElytraTarget yapanlar kontrol dışında kalmaz.
+     */
+    String exemptReasonCombat(Player p, PlayerData d) {
+        if (d.bypass) return "bypass";
+        if (nowMs() < d.exemptUntilMs) return "exempt";
+        if (tick < d.graceUntilTick) return "grace";
+        GameMode gm = p.getGameMode();
+        if (gm == GameMode.CREATIVE || gm == GameMode.SPECTATOR) return "gamemode";
+        if (p.getAllowFlight() || p.isFlying()) return "flight";
+        if (p.isInsideVehicle() || p.isRiptiding() || p.isDead() || p.isSleeping()) return "state";
+        if (cfg.list("general.disabled-worlds").contains(p.getWorld().getName())) return "world";
+        return null;
+    }
+
+    /** Hareket kontrolleri için sert muafiyet nedeni; null = muaf değil. */
     String exemptReason(Player p, PlayerData d) {
+        if (tick < d.moveGraceUntilTick) return "move-grace";
         if (d.bypass) return "bypass";
         if (nowMs() < d.exemptUntilMs) return "exempt";
         if (tick < d.graceUntilTick) return "grace";
@@ -179,6 +196,6 @@ public final class STXAntiCheat extends JavaPlugin {
 
     List<String> checkNames() {
         return List.of("Reach", "Aim", "Aura", "AutoClicker", "Velocity", "Fly", "Step", "HighJump", "Speed", "Timer",
-                "NoFall", "NoSlow", "Scaffold", "Criticals", "ChestStealer", "GuiMove", "Rotation", "Phase", "Jesus", "Spider", "AimAssist");
+                "NoFall", "NoSlow", "Scaffold", "Criticals", "ChestStealer", "GuiMove", "Rotation", "Phase", "Jesus", "Spider", "AimAssist", "ElytraSpeed", "ElytraTarget");
     }
 }

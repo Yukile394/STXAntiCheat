@@ -3,8 +3,10 @@ package dev.stx.anticheat.bukkit;
 import dev.stx.anticheat.core.Geometry;
 import dev.stx.anticheat.core.MoveSample;
 import dev.stx.anticheat.core.Result;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -61,6 +63,7 @@ final class MovementListener implements Listener {
         STXConfig cfg = plugin.cfg();
         long tick = plugin.tick();
         long nowMs = STXAntiCheat.nowMs();
+        long wall = System.currentTimeMillis();
 
         if (!d.hasLast) {
             d.lastX = from.getX(); d.lastY = from.getY(); d.lastZ = from.getZ();
@@ -75,25 +78,43 @@ final class MovementListener implements Listener {
         double dPitch = pitch - d.lastPitch;
         d.pushYawDelta(dYaw);
         d.lastYaw = yaw; d.lastPitch = pitch;
+        long gapMs = d.lastMoveMs == 0 ? 0 : nowMs - d.lastMoveMs;
+        d.lastMoveMs = nowMs;
 
         if (dx * dx + dy * dy + dz * dz > 100.0) d.grace(tick + cfg.i("safety.teleport-grace-ticks", 30));
 
-        boolean exempt = plugin.exemptReason(p, d) != null;
+        String reason = plugin.exemptReason(p, d);
+        boolean gliding = "elytra".equals(reason);            // yalnızca elytra nedeniyle muaf -> elytra kontrolleri çalışır
+        boolean exempt = reason != null;
         boolean lag = plugin.lagging(p, d);
         boolean bad = false;
 
+        d.setHot(wall < d.moveHotUntilMs);                      // yakalanan oyuncu: hassas mod
         d.pushPos(nowMs, to.getX(), to.getY(), to.getZ());
 
-        bad |= flag(p, d, "Timer", d.timer.onMove(nowMs, exempt || lag));
+        bad |= flag(p, d, "Timer", d.timer.onMove(nowMs, (exempt && !gliding) || lag));
 
-        if (!exempt && !lag && d.inCombat(tick) && !(d.bedrock && cfg.b("general.bedrock-relaxed", true)))
+        boolean combatOk = plugin.exemptReasonCombat(p, d) == null && !lag;
+        boolean rotChanged = dYaw != 0 || dPitch != 0;
+        if (combatOk && d.inCombat(tick) && !(d.bedrock && cfg.b("general.bedrock-relaxed", true))) {
             bad |= flag(p, d, "Rotation", d.rotation.onRotation(dPitch));
+            if (rotChanged) bad |= flag(p, d, "Aura", d.snapShape.onRotation(tick, dYaw, dPitch));   // izole snap şekli
+            tracking(p, d, to, yaw, pitch, tick);                                                  // açık alan: kros-hair takibi
+        }
+
+        if (!gliding) d.elytra.reset();
 
         if (moved) {
             World w = to.getWorld();
             boolean standing;
             boolean special = false;
-            if (exempt || lag) {
+            if (gliding && !lag) {
+                // Elytra: vanilla fizik tahmini. Hız verilmişse (knockback/patlama) veya sıvıdaysa değerlendirilmez.
+                boolean skipEval = tick < d.velocityUntilTick || p.isInWater() || p.isInLava() || p.isSwimming()
+                        || Probe.special(p, d, to.getX(), to.getY(), to.getZ(), tick);
+                bad |= flag(p, d, "ElytraSpeed", d.elytra.onMove(dx, dy, dz, yaw, pitch, tick < d.boostUntilTick, skipEval, gapMs));
+                standing = false;
+            } else if (exempt || lag) {
                 MoveSample s = new MoveSample(tick, dx, dy, dz, yaw, pitch, p.isOnGround(), p.isOnGround(), true, false, false,
                         false, false, 1.0, 0, false, p.getFallDistance());
                 standing = p.isOnGround();
@@ -112,7 +133,6 @@ final class MovementListener implements Listener {
                 Result r = d.air.onMove(s);
                 if (r != null) {
                     String name = airName(r);
-                    // Yukarı yönlü Fly sapması duvar yanındaysa Spider olarak adlandır
                     if (name.equals("Fly") && dy > 0 && r.detail().startsWith("Fly") && Probe.nearWall(w, tx, ty, tz)) name = "Spider";
                     bad |= flag(p, d, name, r);
                 }
@@ -128,13 +148,41 @@ final class MovementListener implements Listener {
 
                 if (cfg.enabled("Phase") && !special && !velGrace) bad |= phase(p, d, from, to, w);
 
-                // Geri-ışınlama için "son temiz konum": yerde, kanıtsız, özel ortam dışı
                 if (!bad && standing && !special) d.setGood(w, tx, ty, tz, yaw, pitch);
             }
             d.lastStanding = standing;
             d.lastHSpeed = Math.hypot(dx, dz);
             d.lastX = to.getX(); d.lastY = to.getY(); d.lastZ = to.getZ();
         }
+    }
+
+    /** Savaştaki hedefe kros-hair kalıcılığı (yalnızca oyuncu hedeflerde, yanal hareket ederken anlamlıdır). */
+    private void tracking(Player p, PlayerData d, Location to, float yaw, float pitch, long tick) {
+        if (d.combatTarget == null || tick - d.combatTargetTick > 60 || !plugin.cfg().enabled("Aura")) { d.hasBearing = false; return; }
+        Entity t = Bukkit.getEntity(d.combatTarget);
+        if (!(t instanceof Player tp) || t.isDead() || !t.getWorld().equals(to.getWorld())) { d.hasBearing = false; return; }
+        Location tl = t.getLocation();
+        double ddx = tl.getX() - to.getX(), ddz = tl.getZ() - to.getZ();
+        boolean inRange = Math.hypot(ddx, ddz) < 6.0;
+        double bearing = Math.toDegrees(Math.atan2(ddz, ddx));
+        double bd = d.hasBearing ? Math.abs(Geometry.wrapDegrees(bearing - d.lastBearing)) : 0;
+        d.lastBearing = bearing; d.hasBearing = true;
+        double ex = to.getX(), ey = to.getY() + p.getEyeHeight(), ez = to.getZ();
+        double[] look = Geometry.look(yaw, pitch);
+        boolean on = rayHits(ex, ey, ez, look, Geometry.Box.ofEntity(tl.getX(), tl.getY(), tl.getZ(), t.getWidth(), t.getHeight()).expand(0.12));
+        if (!on) {                                                     // ping geçmişindeki konumlar da sayılır
+            PlayerData td = plugin.peek(tp.getUniqueId());
+            if (td != null) {
+                java.util.List<Geometry.Box> hist = new java.util.ArrayList<>(6);
+                td.collectBoxes(STXAntiCheat.nowMs() - Math.max(100, p.getPing() + 100L), t.getWidth(), t.getHeight(), hist);
+                for (Geometry.Box b : hist) if (rayHits(ex, ey, ez, look, b.expand(0.12))) { on = true; break; }
+            }
+        }
+        plugin.flagger().flag(p, d, "Aura", d.tracking.onTick(inRange, on, bd));
+    }
+
+    private static boolean rayHits(double ex, double ey, double ez, double[] look, Geometry.Box b) {
+        return !Double.isNaN(Geometry.rayBox(ex, ey, ez, look[0], look[1], look[2], b, 7.0));
     }
 
     private static String airName(Result r) {

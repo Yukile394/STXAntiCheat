@@ -37,7 +37,7 @@ final class Flagger {
         if (lvl == SanctionPolicy.Level.LOW) return;          // düşük güven: ihlal sayılmaz (yalnızca kayıt + kısa engel)
 
         // Aktif hareket kısıtı varken doğrulanmış yeni kanıt -> anında geri alma (ihlal sayısı artmaz)
-        if (c.b("sanctions.mitigation-enabled", true) && c.mitigationType(check).equals("MOVE") && d.mitActive("MOVE", now))
+        if (c.b("sanctions.mitigation-enabled", true) && c.mitigationTypes(check).contains("MOVE") && d.mitActive("MOVE", now))
             plugin.sanctions().setback(p, d);
 
         // Yeni "ihlal" yalnızca cooldown sonrası sayılır: her şüpheli hareket ban sebebi olmaz
@@ -59,16 +59,27 @@ final class Flagger {
         STXConfig c = plugin.cfg();
         if (!c.b("sanctions.mitigation-enabled", true) || !c.b("sanctions.instant.enabled", true)) return;
         if (!c.cb(check, "instant", false)) return;
-        if (pts < c.d("sanctions.instant.min-points", 2)) return;
-        String type = c.mitigationType(check);
-        switch (type) {
-            case "ATTACK", "PLACE", "CONTAINER" ->
-                    d.mitUntil.merge(type, now + (long) (c.d("sanctions.instant.block-seconds", 3) * 1000), Math::max);
-            case "MOVE" -> {
-                d.mitUntil.merge("MOVE", now + (long) (c.d("sanctions.instant.move-freeze-seconds", 2) * 1000), Math::max);
-                plugin.sanctions().setback(p, d);
+        java.util.List<String> types = c.mitigationTypes(check);
+        boolean move = types.contains("MOVE");
+        boolean hot = move && now < d.moveHotUntilMs;
+        // hot modda (az önce yakalandı) puan eşiği aranmaz: her yeni kanıt anında geri alınır
+        if (!hot && pts < c.d("sanctions.instant.min-points", 2)) return;
+        long block = (long) (c.d("sanctions.instant.block-seconds", 3) * 1000);
+        for (String type : types) {
+            switch (type) {
+                case "ATTACK", "PLACE", "CONTAINER" -> d.mitUntil.merge(type, now + block, Math::max);
+                case "ELYTRA" -> {
+                    d.mitUntil.merge("ELYTRA", now + block * 2, Math::max);
+                    plugin.sanctions().stopGliding(p);
+                }
+                case "MOVE" -> {
+                    d.mitUntil.merge("MOVE", now + (long) (c.d("sanctions.instant.move-freeze-seconds", 3) * 1000), Math::max);
+                    // hot mod: bu hileden yakalanan oyuncu sonraki N saniye boyunca çok hassas izlenir (hızlı yeniden-tespit)
+                    d.moveHotUntilMs = now + (long) (c.d("sanctions.instant.hot-seconds", 30) * 1000);
+                    plugin.sanctions().setback(p, d);
+                }
+                default -> { }
             }
-            default -> { }
         }
     }
 

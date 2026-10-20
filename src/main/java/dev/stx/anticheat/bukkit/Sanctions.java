@@ -22,6 +22,7 @@ final class Sanctions {
             case "MOVE" -> "hareketlerin";
             case "PLACE" -> "blok yerleştirmelerin";
             case "CONTAINER" -> "konteyner işlemlerin";
+            case "ELYTRA" -> "elytra kullanımın";
             default -> "işlemlerin";
         };
     }
@@ -33,7 +34,8 @@ final class Sanctions {
     void execute(Player p, PlayerData d, String check, SanctionPolicy.Stage st, int n,
                  SanctionPolicy.Rule rule, long nowWall) {
         STXConfig c = plugin.cfg();
-        String type = c.mitigationType(check);
+        java.util.List<String> types = c.mitigationTypes(check);
+        String type = types.isEmpty() ? "NONE" : types.get(0);
         boolean canMitigate = c.b("sanctions.mitigation-enabled", true) && !type.equals("NONE");
         String counter = rule.banEligible()
                 ? "§7(" + Math.min(n, rule.violationsToBan()) + "/" + rule.violationsToBan() + ")"
@@ -42,13 +44,13 @@ final class Sanctions {
             case LOG -> { }
             case WARN_MITIGATE -> {
                 if (!canMitigate) return;
-                start(p, d, type, rule.mitigationSeconds(), nowWall);
+                startAll(p, d, types, rule.mitigationSeconds(), nowWall);
                 tell(p, "§e§lAntiCheat §8» §eŞüpheli hareketlerin algılandı! " + rule.mitigationSeconds()
                         + " saniye boyunca " + noun(type) + " engellendi. " + counter);
             }
             case RESTRICT -> {
                 if (!canMitigate) return;
-                start(p, d, type, rule.restrictSeconds(), nowWall);
+                startAll(p, d, types, rule.restrictSeconds(), nowWall);
                 tell(p, "§e§lAntiCheat §8» §6Hile şüphesi devam ediyor! " + cap(noun(type)) + " kısıtlandı. " + counter);
             }
             case BAN -> {
@@ -64,7 +66,7 @@ final class Sanctions {
                 } else {
                     plugin.flagger().recordEvent("WOULD_BAN", p, d, check, "n=" + n, nowWall);
                     if (canMitigate) {
-                        start(p, d, type, rule.restrictSeconds(), nowWall);
+                        startAll(p, d, types, rule.restrictSeconds(), nowWall);
                         tell(p, "§e§lAntiCheat §8» §6Hile şüphesi devam ediyor! " + cap(noun(type)) + " kısıtlandı. " + counter);
                     }
                     notifyWouldBan(p, d, check, n, nowWall);
@@ -95,12 +97,22 @@ final class Sanctions {
         }
     }
 
+    void startAll(Player p, PlayerData d, java.util.List<String> types, int seconds, long nowWall) {
+        for (String t : types) start(p, d, t, seconds, nowWall);
+    }
+
+    /** Elytra'yı kapatır: havadaysa uçuşu bitirir (düşüş serbest). */
+    void stopGliding(Player p) {
+        Bukkit.getScheduler().runTask(plugin, () -> { if (p.isOnline() && p.isGliding()) p.setGliding(false); });
+    }
+
     void start(Player p, PlayerData d, String type, int seconds, long nowWall) {
         long until = nowWall + seconds * 1000L;
         d.mitUntil.merge(type, until, Math::max);
         plugin.ledger().setMitigation(p.getUniqueId(), type, d.mitUntil.get(type));
         plugin.markDirty();
-        if (type.equals("MOVE")) setback(p, d);
+        if (type.equals("MOVE")) { d.moveHotUntilMs = Math.max(d.moveHotUntilMs, nowWall + 30_000L); setback(p, d); }
+        if (type.equals("ELYTRA")) stopGliding(p);
     }
 
     /** Oyuncuyu son temiz (yerde, kanıtsız) konuma geri alır. Bir sonraki tikte, tek görevle. */

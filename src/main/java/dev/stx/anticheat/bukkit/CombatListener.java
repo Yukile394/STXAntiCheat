@@ -35,12 +35,12 @@ final class CombatListener implements Listener {
 
     /** İstatistiksel kontroller (CPS, Reach tamponu...) için: lag/TPS düşüşünde atla. */
     private boolean skip(Player p, PlayerData d) {
-        return plugin.exemptReason(p, d) != null || plugin.lagging(p, d);
+        return plugin.exemptReasonCombat(p, d) != null || plugin.lagging(p, d);
     }
 
     /** Geometrik kontroller (duvar, bakış açısı) için: yalnızca muafiyet ve aşırı ping. TPS düşüşü bunları kapatmaz. */
     private boolean skipGeometry(Player p, PlayerData d) {
-        return plugin.exemptReason(p, d) != null || p.getPing() > 700;
+        return plugin.exemptReasonCombat(p, d) != null || p.getPing() > 700;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -53,6 +53,23 @@ final class CombatListener implements Listener {
         if (r != null) plugin.flagger().flag(p, d, "AutoClicker", r);
     }
 
+    /** Havai fişek: boost penceresi (ElytraSpeed için) + otomatik roket ritmi (ElytraTarget). */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRocket(PlayerInteractEvent e) {
+        if (e.getAction() != Action.RIGHT_CLICK_AIR && e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        org.bukkit.inventory.ItemStack it = e.getItem();
+        Player p = e.getPlayer();
+        if (it == null || it.getType() != org.bukkit.Material.FIREWORK_ROCKET || !p.isGliding()) return;
+        PlayerData d = plugin.data(p);
+        int power = 3;
+        try { if (it.getItemMeta() instanceof org.bukkit.inventory.meta.FireworkMeta fm) power = Math.max(0, fm.getPower()); } catch (Throwable ignored) { }
+        long tick = plugin.tick();
+        d.boostUntilTick = Math.max(d.boostUntilTick, tick + 10L * (power + 1) + 25);      // roket ömrü + pay
+        if (d.bypass || tick - d.lastAttackTick > 400 || !plugin.cfg().enabled("ElytraTarget")) return;   // yalnızca savaş bağlamında
+        Result r = d.rocket.onUse(tick);
+        if (r != null) plugin.flagger().flag(p, d, "ElytraTarget", r);
+    }
+
     /** Saldırı girişimi: geçici saldırı engeli, CPS, vuruş aralığı, Criticals deseni. */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onAttackAttempt(PrePlayerAttackEntityEvent e) {
@@ -61,6 +78,8 @@ final class CombatListener implements Listener {
         if (d.mitActive("ATTACK", System.currentTimeMillis())) { e.setCancelled(true); return; }
         long tick = plugin.tick();
         d.lastAttackTick = tick;
+        d.combatTarget = e.getAttacked().getUniqueId();
+        d.combatTargetTick = tick;
         if (d.bypass || skip(p, d)) return;
         if (!relaxed(d)) {
             Result r = d.click.onSwing(STXAntiCheat.nowMs());
@@ -86,9 +105,11 @@ final class CombatListener implements Listener {
         PlayerData d = plugin.data(p);
         if (d.mitActive("ATTACK", System.currentTimeMillis())) { e.setCancelled(true); return; }
         if (e.getCause() != EntityDamageEvent.DamageCause.ENTITY_ATTACK) return;
-        if (d.bypass || plugin.exemptReason(p, d) != null) return;
+        if (d.bypass || plugin.exemptReasonCombat(p, d) != null) return;
         Entity target = e.getEntity();
         if (target == p) return;
+        d.combatTarget = target.getUniqueId();
+        d.combatTargetTick = plugin.tick();
 
         STXConfig cfg = plugin.cfg();
         boolean cancelOk = cfg.b("sanctions.mitigation-enabled", true);
@@ -136,6 +157,18 @@ final class CombatListener implements Listener {
                 r = d.aimAssist.onHit(angle);
                 if (r != null) plugin.flagger().flag(p, d, "AimAssist", r);
             }
+        }
+
+        // 4b) ELYTRATARGET: elytra ile hedefe kilitli vuruş / dön-vur-geri dön
+        if (geo && p.isGliding() && cfg.enabled("ElytraTarget")) {
+            double eyeErr = angle;
+            if (target instanceof org.bukkit.entity.LivingEntity le) {
+                Location te = le.getEyeLocation();
+                Box eb = Box.ofEntity(te.getX(), te.getY() - 0.05, te.getZ(), 0.1, 0.1);
+                eyeErr = Math.min(eyeErr, AimCheck.minAngle(eye.getX(), eye.getY(), eye.getZ(), eye.getYaw(), eye.getPitch(), List.of(eb)));
+            }
+            Result r = d.elytraHit.onHit(true, d.snapBack(), eyeErr);
+            if (r != null) plugin.flagger().flag(p, d, "ElytraTarget", r);
         }
 
         // 5) AURA davranışı: çoklu hedef + keskin dönüş + sessiz rotasyon (dön-vur-geri dön)
