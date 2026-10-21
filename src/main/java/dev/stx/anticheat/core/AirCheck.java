@@ -12,7 +12,7 @@ public final class AirCheck {
     private boolean prevGround = true;
     private double lastDy;
     private int airTicks, skip, hover;
-    private double rise;
+    private double rise, height;
 
     private final FlagBuffer flyBuf = new FlagBuffer(3, 0.5);
     private final FlagBuffer fallBuf = new FlagBuffer(3, 0.5);
@@ -39,7 +39,7 @@ public final class AirCheck {
     private void resetState(MoveSample s) {
         prevGround = s.standing();
         lastDy = s.dy();
-        airTicks = 0; hover = 0; rise = 0;
+        airTicks = 0; hover = 0; rise = 0; height = 0;
         skip = 3;
         flyBuf.reset(); fallBuf.reset();
     }
@@ -64,13 +64,15 @@ public final class AirCheck {
             } else {
                 stepBuf.pass();
             }
-            airTicks = 0; rise = 0; hover = 0;
+            airTicks = 0; rise = 0; hover = 0; height = 0;
         } else if (prevGround) {
             // Kalkış tiki
-            double max = 0.42 + 0.1 * s.jumpLevel() + 0.06;
+            // Kalkış tikinde basamak/slab çıkışı (0.5-0.6) meşrudur: sınır = max(zıplama, adım yüksekliği 0.6) + pay
+            double max = Math.max(0.6, 0.42 + 0.1 * s.jumpLevel()) + 0.05;
             if (s.dy() > max) r = Result.of(1.0, "HighJump takeoff dy=" + fmt(s.dy()) + " max=" + fmt(max));
             airTicks = 0;
-            rise = Math.max(0, s.dy());
+            height = s.dy();
+            rise = Math.max(0, height);
             hover = 0;
         } else {
             airTicks++;
@@ -83,7 +85,8 @@ public final class AirCheck {
             } else {
                 flyBuf.pass(); fallBuf.pass();
             }
-            if (s.dy() > 0) rise += s.dy();
+            height += s.dy();                           // NET yükseklik (aşağı inişler düşülür)
+            rise = Math.max(rise, height);
             hover = Math.abs(s.dy()) < 0.02 ? hover + 1 : 0;
             if (r == null && hover >= (hot ? Math.max(3, hoverTicks / 2) : hoverTicks)) {
                 r = Result.of(1.0, "Hover " + hover + " tik havada sabit");

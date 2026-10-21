@@ -1,6 +1,8 @@
 package dev.stx.anticheat.core;
 
 /**
+ * Yatay hız DIŞ GÜVENLİK sınırı (geniş tolerans). Asıl tespit MotionCheck (vanilla ivme modeli) tarafından yapılır;
+ * bu sınır yalnızca modelin kaçırabileceği absürt hızlar içindir.
  * Yatay hız: anlık sınır + 20 tiklik ortalama.
  * Taban değerler VanillaSim ile ölçülmüştür (sprint+bunny-hop dahil, en kötü meşru durum):
  *  - zemin  : 0.3129 * mul        (bhop iniş tiki)

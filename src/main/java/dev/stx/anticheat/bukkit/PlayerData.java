@@ -18,6 +18,7 @@ public final class PlayerData {
 
     public AirCheck air;
     public SpeedCheck speed;
+    public MotionCheck motion;
     public TimerCheck timer;
     public NoFallCheck noFall;
     public NoSlowCheck noSlow;
@@ -92,7 +93,8 @@ public final class PlayerData {
     /** Kontrolleri (yeniden) oluşturur; /stx reload sonrası da çağrılır. */
     public void build(STXConfig c) {
         air = new AirCheck(c.ci("Fly", "hover-ticks", 8), c.cd("Fly", "max-rise", 1.32));
-        speed = new SpeedCheck(c.cd("Speed", "margin", 0.10), c.cd("Speed", "ice-multiplier", 2.2));
+        speed = new SpeedCheck(c.cd("Speed", "margin", 0.30), c.cd("Speed", "ice-multiplier", 2.2));   // yalnızca dış güvenlik sınırı
+        motion = new MotionCheck(c.cd("Speed", "model-tolerance", 1.12), c.cd("Speed", "model-abs", 0.02));
         timer = new TimerCheck(c.cd("Timer", "max-credit-ms", 800), c.cd("Timer", "tolerance-ms", 100));
         noFall = new NoFallCheck();
         noSlow = new NoSlowCheck(c.cd("NoSlow", "limit", 0.12));
@@ -120,7 +122,7 @@ public final class PlayerData {
     public void setHot(boolean h) {
         if (h == hotApplied) return;
         hotApplied = h;
-        air.setHot(h); speed.setHot(h); noFall.setHot(h); noSlow.setHot(h); elytra.setHot(h);
+        air.setHot(h); speed.setHot(h); motion.setHot(h); noFall.setHot(h); noSlow.setHot(h); elytra.setHot(h);
     }
 
     public void grace(long untilTick) { graceUntilTick = Math.max(graceUntilTick, untilTick); }
@@ -150,7 +152,7 @@ public final class PlayerData {
     /** Teleport/dünya değişimi sonrası referansları sıfırla. */
     public void resetMotionState() {
         hasLast = false;
-        elytra.reset(); tracking.reset(); snapShape.reset(); hasBearing = false; hotApplied = false;
+        elytra.reset(); motion.reset(); tracking.reset(); snapShape.reset(); hasBearing = false; hotApplied = false;
         timer.reset();
         velocity.cancel();
         rotation.reset();

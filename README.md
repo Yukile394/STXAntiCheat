@@ -6,7 +6,7 @@ bu yüzden 1.21.x sürümleri arasında yeniden derleme gerektirmesi beklenmez.
 ## Derleme
 Yerelde (Java 21 gerekir; Gradle ayrıca kurmanız gerekmez, `gradlew` 8.10'u kendisi indirir):
 ```
-./gradlew build         # build/libs/STXAntiCheat-1.0.0.jar  (+ 126 çekirdek test)
+./gradlew build         # build/libs/STXAntiCheat-1.0.0.jar  (+ 141 çekirdek test)
 ./gradlew coreTests     # yalnızca tespit mantığı testleri
 ```
 Windows'ta `gradlew.bat build`. JAR'ı sunucunun `plugins/` klasörüne atın.
@@ -41,6 +41,30 @@ AutoClicker, Criticals, ChestStealer, GuiMove, Velocity, Rotation, AimAssist **b
 
 Çıkıp girme: girişte kontroller sıfırdan kurulur, ihlaller ve bitmemiş kısıtlar defterden geri yüklenir. Dünya değişimi,
 respawn, teleport ve kendi geri-ışınlamamız için ayrı kısa tolerans vardır. Defter periyodik (asenkron, atomik) ve kapanışta kaydedilir.
+
+## Oyun içinden koruma kapatma / açma
+| Komut | Ne yapar |
+|---|---|
+| `/stx kapat aura` | Aura kontrolünü kapatır (log, engel, ihlal, ban: hiçbiri çalışmaz) |
+| `/stx kapat aura speed` | Birden fazla kontrolü birden kapatır |
+| `/stx kapat fly 10` | Fly'ı **10 dk** kapatır, sonra kendiliğinden açılır |
+| `/stx kapat hepsi` | Tüm korumaları kapatır |
+| `/stx geriac aura` (veya `geriaç`) | Aura'yı geri açar (`hepsi` ile tümü) |
+| `/stx kontroller` | Hangi kontroller açık / oyun içinden kapatılmış / config'te kapalı |
+
+Kapatılan kontrol **sunucu yeniden başlasa da kapalı kalır** (`data/disabled-checks.txt`); `/stx geriac` ile açılana kadar. Kapatılınca o
+kontrolün başlattığı dondurma/saldırı engeli gibi kısıtlar da anında kalkar. Adlar büyük/küçük harf duyarsızdır; kısayollar:
+`killaura`→Aura, `elytra`→ElytraSpeed+ElytraTarget, `clicker`→AutoClicker, `antikb`→Velocity, `jump`→HighJump. Sekme tamamlama vardır.
+İzin: `stx.admin`.
+
+## Doğruluk modelleri (Speed / HighJump / NoSlow / Scaffold)
+- **Speed – vanilla ivme-artığı modeli:** her tik `D[k+1] = f·D[k] + A` (sürtünme f, girdi ivmesi |A| ≤ aMax). Buz/mavi buz sürtünmesi, hız efekti,
+  sprint-zıplama bonusu (+0.2), zemin↔hava geçişi, önceki hız hesaba katılır. Rastgele strafe/çapraz/zıplama/buz/hız efekti ile **360 000 tikte 0 kanıt**;
+  1.25x çarpan, +0.12 ivme ve %12 sinsi artış yakalanır. Eski sabit limit yalnızca absürt hızlar için geniş toleranslı dış sınırdır.
+- **HighJump:** kalkış tikinde basamak/slab çıkışı (≤0.6) meşrudur; yükselme sayacı artık NET yüksekliktir (iniş düşülür); özel `jump_strength` özniteliği hesaba katılır.
+- **NoSlow:** yalnızca yerde ve ≥4 tik durduktan sonra; spyglass/boynuz/fırça yok sayılır (`NoSlow.ignore-materials`); ayrıca "eşya kullanırken sprint" sinyali.
+- **Scaffold:** `rayTraceBlocks` yerine bakış ışınının **tıklanan yüze hatası** hesaplanır; eğilme geçişindeki ~0.35 göz yüksekliği farkı için üç yükseklikten en iyisi alınır,
+  böylece ninja/god-bridge yapan meşru oyuncular cezalanmaz. Bakmadan yerleştirme (Scaffold) büyük hata verir.
 
 ## Hot mod (hile açıkken sürekli engel)
 Bir hareket hilesi (Fly/Speed/Step/Jesus/NoSlow/...) yakalanınca oyuncu **30 sn "hot" moda** girer: tüm hareket kontrollerinin
@@ -118,7 +142,7 @@ Bu düzeltme koddan türetildi; gerçek sunucuda bataklıkta doğrulayın.
 - Folia desteklenmez.
 
 ## Test durumu
-- Çekirdek mantık (`core/`): **126 otomatik test geçiyor** (ihlal defteri kalıcılığı/relog, ceza basamakları ve ban kilitleri, Jesus dahil); meşru yürüme/sprint/bunny-hop/düşme/knockback/lag
+- Çekirdek mantık (`core/`): **141 otomatik test geçiyor** (ihlal defteri kalıcılığı/relog, ceza basamakları ve ban kilitleri, Jesus dahil); meşru yürüme/sprint/bunny-hop/düşme/knockback/lag
   senaryolarında 0 kanıt, hile senaryolarında tespit.
 - Paper adaptörü (`bukkit/`): gerçek Paper API'si ile **derlenmedi ve canlı sunucuda denenmedi**
   (geliştirme ortamında API indirilemedi; yalnızca kendi stub'larımla iç tutarlılık denendi). İlk `./gradlew build`

@@ -3,6 +3,7 @@ package dev.stx.anticheat.bukkit;
 import dev.stx.anticheat.core.AimCheck;
 import dev.stx.anticheat.core.Geometry.Box;
 import dev.stx.anticheat.core.ReachCheck;
+import dev.stx.anticheat.core.ScaffoldMath;
 import dev.stx.anticheat.core.Result;
 import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
 import java.util.ArrayList;
@@ -245,10 +246,15 @@ final class CombatListener implements Listener {
             Location eye = p.getEyeLocation();
             double fx = against.getX() + 0.5 + 0.5 * nx, fy = against.getY() + 0.5 + 0.5 * ny, fz = against.getZ() + 0.5 + 0.5 * nz;
             double dot = (eye.getX() - fx) * nx + (eye.getY() - fy) * ny + (eye.getZ() - fz) * nz;
-            wrongFace = dot < -0.15;
+            wrongFace = dot < -0.2 && !relaxed(d);
             if (!relaxed(d)) {
-                RayTraceResult rr = p.rayTraceBlocks(6.0);
-                rayMiss = rr == null || rr.getHitBlock() == null || !rr.getHitBlock().equals(against);
+                // Bakış ışınının tıklanan yüze hatası. Eğilme geçişinde sunucu/istemci göz yüksekliği ~0.35 ayrışabildiği için
+                // üç göz yüksekliğinden en küçük hata alınır (meşru köprü kuranları cezalandırmamak için).
+                double tol = plugin.cfg().cd("Scaffold", "ray-error", 0.6), best = 99;
+                for (double dy : new double[]{0, -0.35, 0.35})
+                    best = Math.min(best, ScaffoldMath.rayFaceError(eye.getX(), eye.getY() + dy, eye.getZ(), eye.getYaw(), eye.getPitch(),
+                            fx, fy, fz, nx, ny, nz));
+                rayMiss = best > tol;
             }
         }
         Result r = d.scaffold.onPlace(plugin.tick(), wrongFace, rayMiss, d.lastHSpeed);

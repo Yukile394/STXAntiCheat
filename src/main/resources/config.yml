@@ -157,7 +157,9 @@ checks:
   Speed:
     enabled: true
     weight: 1.0
-    margin: 0.10                 # vanilla (sprint+bhop) limitlerinin üstüne tolerans
+    margin: 0.30                 # DIŞ güvenlik sınırı (yalnızca absürt hızlar); asıl tespit ivme modelidir
+    model-tolerance: 1.12        # vanilla ivme modeli: izin verilen azami ivmenin çarpanı
+    model-abs: 0.02              # ... + mutlak pay (blok/tik)
     ice-multiplier: 2.2
     mitigation: MOVE
     ban-eligible: true
@@ -180,6 +182,7 @@ checks:
     enabled: true
     weight: 1.0
     limit: 0.12
+    ignore-materials: [SPYGLASS, GOAT_HORN, BRUSH]   # kullanımı yavaşlatmayan/şüpheli eşyalar
     mitigation: MOVE
     ban-eligible: true
     instant: true
@@ -187,6 +190,7 @@ checks:
     enabled: true
     weight: 1.0
     rate-per-20-ticks: 14
+    ray-error: 0.6               # bakış ışınının tıklanan yüze izin verilen hatası (blok)
     mitigation: PLACE
     ban-eligible: true
     instant: true

@@ -7,8 +7,28 @@ import org.bukkit.configuration.file.FileConfiguration;
 /** config.yml üzerinde tipli erişim. Eksik anahtarlarda güvenli varsayılan döner. */
 public final class STXConfig {
     private final FileConfiguration c;
+    /** Oyun içinden kapatılan kontroller: ad -> bitiş (duvar saati ms); 0 = elle açılana kadar. Plugin ile paylaşılır. */
+    private final java.util.Map<String, Long> disabled;
+    private final java.util.Set<org.bukkit.Material> noSlowIgnore = new java.util.HashSet<>();
 
-    public STXConfig(FileConfiguration c) { this.c = c; }
+    public STXConfig(FileConfiguration c, java.util.Map<String, Long> disabled) {
+        this.c = c;
+        this.disabled = disabled;
+        for (String n : c.getStringList("checks.NoSlow.ignore-materials")) {
+            org.bukkit.Material m = org.bukkit.Material.matchMaterial(n);
+            if (m != null) noSlowIgnore.add(m);
+        }
+    }
+
+    public java.util.Set<org.bukkit.Material> noSlowIgnore() { return noSlowIgnore; }
+
+    /** /stx kapat ile kapatıldı mı? Süresi dolan otomatik açılır. */
+    public boolean runtimeDisabled(String check) {
+        Long u = disabled.get(check);
+        if (u == null) return false;
+        if (u != 0 && u <= System.currentTimeMillis()) { disabled.remove(check); return false; }
+        return true;
+    }
 
     public boolean b(String path, boolean def) { return c.getBoolean(path, def); }
     public double d(String path, double def) { return c.getDouble(path, def); }
@@ -16,7 +36,7 @@ public final class STXConfig {
     public String s(String path, String def) { return c.getString(path, def); }
     public List<String> list(String path) { return c.getStringList(path); }
 
-    public boolean enabled(String check) { return c.getBoolean("checks." + check + ".enabled", true); }
+    public boolean enabled(String check) { return c.getBoolean("checks." + check + ".enabled", true) && !runtimeDisabled(check); }
     public double weight(String check) { return c.getDouble("checks." + check + ".weight", 1.0); }
     public double cd(String check, String key, double def) { return c.getDouble("checks." + check + "." + key, def); }
     public int ci(String check, String key, int def) { return c.getInt("checks." + check + "." + key, def); }

@@ -21,7 +21,9 @@ public final class STXAntiCheat extends JavaPlugin {
     private Sanctions sanctions;
     private final ViolationLedger ledger = new ViolationLedger();
     private volatile boolean dirty;
-    private Path ledgerFile;
+    private Path ledgerFile, disabledFile;
+    /** Oyun içinden kapatılan kontroller (kalıcı). */
+    private final Map<String, Long> disabledChecks = new ConcurrentHashMap<>();
     private ViolationLog vlog;
     private volatile long tick;
     private volatile double tps = 20.0;
@@ -31,6 +33,8 @@ public final class STXAntiCheat extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        disabledFile = getDataFolder().toPath().resolve("data").resolve("disabled-checks.txt");
+        loadDisabled();
         loadSettings();
         vlog = new ViolationLog(getDataFolder().toPath().resolve("logs"), cfg.i("logging.queue-size", 20000),
                 cfg.i("logging.keep-days", 14), getLogger());
@@ -65,6 +69,7 @@ public final class STXAntiCheat extends JavaPlugin {
         Bukkit.getScheduler().runTaskTimer(this, () -> { if (dirty) saveLedger(false); }, every, every);
 
         for (Player p : Bukkit.getOnlinePlayers()) reinit(p);    // /reload veya geç yükleme
+        if (!disabledChecks.isEmpty()) getLogger().warning("Oyun içinden KAPATILMIŞ kontroller: " + disabledChecks.keySet() + " (/stx geriac ile açın)");
         getLogger().info("STXAntiCheat etkin. Geçici müdahale: " + (cfg.b("sanctions.mitigation-enabled", true) ? "AÇIK" : "KAPALI")
                 + " | Ban: " + (cfg.banActive() ? "AÇIK (" + cfg.d("sanctions.ban-duration-days", 7) + " gün)" : "KAPALI"));
     }
@@ -81,7 +86,7 @@ public final class STXAntiCheat extends JavaPlugin {
 
     void loadSettings() {
         reloadConfig();
-        cfg = new STXConfig(getConfig());
+        cfg = new STXConfig(getConfig(), disabledChecks);
         for (PlayerData d : players.values()) d.build(cfg);
     }
 
@@ -192,6 +197,72 @@ public final class STXAntiCheat extends JavaPlugin {
             if (r != null) flagger.flag(p, d, "Velocity", r);
           } catch (Throwable t) { getLogger().warning("heartbeat hatası (" + p.getName() + "): " + t); }
         }
+    }
+
+    // ================= /stx kapat – /stx geriac =================
+    private void loadDisabled() {
+        try {
+            String txt = ViolationLedger.read(disabledFile);
+            for (String line : txt.split("\n")) {
+                if (line.isBlank() || line.startsWith("#")) continue;
+                String[] p = line.split("\\|");
+                try { disabledChecks.put(p[0].trim(), p.length > 1 ? Long.parseLong(p[1].trim()) : 0L); } catch (NumberFormatException ignored) { }
+            }
+        } catch (IOException e) {
+            getLogger().warning("Kapalı kontroller okunamadı: " + e.getMessage());
+        }
+    }
+
+    private void saveDisabled() {
+        StringBuilder sb = new StringBuilder("# /stx kapat ile kapatılan kontroller: ad|bitiş(ms, 0=kalıcı)\n");
+        long now = System.currentTimeMillis();
+        disabledChecks.forEach((k, v) -> { if (v == 0 || v > now) sb.append(k).append('|').append(v).append('\n'); });
+        try { ViolationLedger.writeAtomic(disabledFile, sb.toString()); }
+        catch (IOException e) { getLogger().warning("Kapalı kontroller yazılamadı: " + e.getMessage()); }
+    }
+
+    /** "aura", "killaura", "elytra", "hepsi" gibi adları kontrol adlarına çevirir; bilinmeyen ad varsa null döner. */
+    List<String> resolveChecks(String raw) {
+        String k = raw.toLowerCase(java.util.Locale.ROOT).replace("ı", "i");
+        if (k.equals("hepsi") || k.equals("all") || k.equals("tum") || k.equals("tumu")) return checkNames();
+        switch (k) {
+            case "killaura" -> { return List.of("Aura"); }
+            case "elytra" -> { return List.of("ElytraSpeed", "ElytraTarget"); }
+            case "clicker", "cps" -> { return List.of("AutoClicker"); }
+            case "antikb", "kb", "antiknockback" -> { return List.of("Velocity"); }
+            case "jump" -> { return List.of("HighJump"); }
+            case "gcd" -> { return List.of("Rotation"); }
+            default -> { }
+        }
+        for (String n : checkNames()) if (n.toLowerCase(java.util.Locale.ROOT).equals(k)) return List.of(n);
+        return null;
+    }
+
+    /** @param untilMs 0 = elle açılana kadar */
+    void disableChecks(List<String> names, long untilMs) {
+        for (String n : names) { disabledChecks.put(n, untilMs); clearMitigationsFor(n); }
+        saveDisabled();
+    }
+
+    void enableChecks(List<String> names) {
+        for (String n : names) disabledChecks.remove(n);
+        saveDisabled();
+    }
+
+    boolean isRuntimeDisabled(String check) { return cfg.runtimeDisabled(check); }
+
+    /** Kapatılan kontrolün başlattığı kısıtlar (dondurma/saldırı engeli...) anında kalkar. */
+    private void clearMitigationsFor(String check) {
+        List<String> types = cfg.mitigationTypes(check);
+        for (PlayerData d : players.values()) {
+            for (String t : types) {
+                d.mitUntil.remove(t);
+                ledger.setMitigation(d.uuid, t, 0);
+            }
+            if (types.contains("MOVE")) d.moveHotUntilMs = 0;
+            d.suspicion.clear();
+        }
+        markDirty();
     }
 
     List<String> checkNames() {

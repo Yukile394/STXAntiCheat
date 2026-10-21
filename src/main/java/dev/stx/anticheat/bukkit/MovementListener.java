@@ -112,13 +112,14 @@ final class MovementListener implements Listener {
                 // Elytra: vanilla fizik tahmini. Hız verilmişse (knockback/patlama) veya sıvıdaysa değerlendirilmez.
                 boolean skipEval = tick < d.velocityUntilTick || p.isInWater() || p.isInLava() || p.isSwimming()
                         || Probe.special(p, d, to.getX(), to.getY(), to.getZ(), tick);
+                d.motion.reset();
                 bad |= flag(p, d, "ElytraSpeed", d.elytra.onMove(dx, dy, dz, yaw, pitch, tick < d.boostUntilTick, skipEval, gapMs));
                 standing = false;
             } else if (exempt || lag) {
                 MoveSample s = new MoveSample(tick, dx, dy, dz, yaw, pitch, p.isOnGround(), p.isOnGround(), true, false, false,
                         false, false, 1.0, 0, false, p.getFallDistance());
                 standing = p.isOnGround();
-                d.air.onMove(s); d.speed.onMove(s); d.noFall.onMove(s, () -> true); d.noSlow.onMove(s);
+                d.air.onMove(s); d.speed.onMove(s); d.motion.onMove(s, gapMs, null); d.noFall.onMove(s, () -> true); d.noSlow.onMove(s);
                 d.jesus.onMove(false, 0, 0, true);
             } else {
                 final double tx = to.getX(), ty = to.getY(), tz = to.getZ();
@@ -127,8 +128,9 @@ final class MovementListener implements Listener {
                 boolean ice = Probe.ice(d, w, tx, ty, tz, tick);
                 boolean velGrace = tick < d.velocityUntilTick;
                 MoveSample s = new MoveSample(tick, dx, dy, dz, yaw, pitch, p.isOnGround(), standing, false, velGrace, special,
-                        Probe.gravityAltered(p), ice, Probe.speedMul(p), Probe.jumpLevel(p), p.isHandRaised(),
-                        p.getFallDistance());
+                        Probe.gravityAltered(p), ice, Probe.speedMul(p), Probe.jumpLevel(p),
+                        Probe.usingItemSlows(p, cfg.noSlowIgnore()), p.getFallDistance(),
+                        Probe.slip(w, tx, ty, tz, standing), p.isSprinting(), Probe.moveAttr(p));
 
                 Result r = d.air.onMove(s);
                 if (r != null) {
@@ -136,7 +138,8 @@ final class MovementListener implements Listener {
                     if (name.equals("Fly") && dy > 0 && r.detail().startsWith("Fly") && Probe.nearWall(w, tx, ty, tz)) name = "Spider";
                     bad |= flag(p, d, name, r);
                 }
-                bad |= flag(p, d, "Speed", d.speed.onMove(s));
+                bad |= flag(p, d, "Speed", d.motion.onMove(s, gapMs, () -> Probe.entityNear(p)));   // vanilla ivme modeli
+                bad |= flag(p, d, "Speed", d.speed.onMove(s));                                      // dış güvenlik sınırı
                 bad |= flag(p, d, "NoFall", d.noFall.onMove(s, () -> Probe.supportedLoose(p, tx, ty, tz)));
                 bad |= flag(p, d, "NoSlow", d.noSlow.onMove(s));
                 bad |= flag(p, d, "Velocity", d.velocity.onMove(s, nowMs));

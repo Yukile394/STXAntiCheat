@@ -215,9 +215,48 @@ final class Probe {
         return Math.max(0.5, mul);
     }
 
+    private static final Attribute JUMP = attr("jump_strength", "generic.jump_strength");
+
+    /** Etkin zıplama seviyesi: Zıplama Güçlendirme + özel jump_strength özniteliği (taban 0.42) farkı. */
     static int jumpLevel(Player p) {
         PotionEffect e = p.getPotionEffect(PotionEffectType.JUMP_BOOST);
-        return e == null ? 0 : e.getAmplifier() + 1;
+        int lvl = e == null ? 0 : e.getAmplifier() + 1;
+        if (JUMP != null) {
+            AttributeInstance in = p.getAttribute(JUMP);
+            if (in != null) lvl += Math.max(0, (int) Math.round((in.getValue() - 0.42) / 0.1));
+        }
+        return lvl;
+    }
+
+    /** Ayak altındaki bloğun sürtünmesi (yalnızca yerdeyken anlamlı). */
+    static double slip(World w, double x, double y, double z, boolean standing) {
+        if (!standing) return 0.6;
+        Material m = w.getBlockAt(floor(x), floor(y - 0.5000001), floor(z)).getType();
+        if (m == Material.BLUE_ICE) return 0.989;
+        if (m == Material.ICE || m == Material.PACKED_ICE || m == Material.FROSTED_ICE) return 0.98;
+        if (m == Material.SLIME_BLOCK) return 0.8;
+        return 0.6;
+    }
+
+    /** Hareket hızı özniteliği (sprint, efekt ve özel modifier'lar dahil). Yoksa yaklaşık değer. */
+    static double moveAttr(Player p) {
+        if (MOVE != null) {
+            AttributeInstance in = p.getAttribute(MOVE);
+            if (in != null) return Math.max(0.02, in.getValue());
+        }
+        return (p.isSprinting() ? 0.13 : 0.1) * speedMul(p);
+    }
+
+    /** Eşya kullanımı yavaşlatıyor mu? Yavaşlatmayan eşyalar (spyglass, boynuz, fırça) config listesiyle yok sayılır. */
+    static boolean usingItemSlows(Player p, java.util.Set<Material> ignore) {
+        if (!p.isHandRaised()) return false;
+        org.bukkit.inventory.ItemStack it = p.getActiveItem();
+        return it == null || !ignore.contains(it.getType());
+    }
+
+    /** Yakında itebilecek varlık var mı (yalnızca ihlal şüphesinde çağrılır). */
+    static boolean entityNear(Player p) {
+        return !p.getNearbyEntities(1.15, 1.0, 1.15).isEmpty();
     }
 
     static boolean gravityAltered(Player p) {

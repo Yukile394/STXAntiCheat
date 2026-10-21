@@ -45,6 +45,7 @@ public class CoreTests {
         scaffoldCriticalsWindow();
         policy();
         newChecks();
+        accuracy();
         System.out.println("\n== " + passed + " geçti, " + failed + " başarısız ==");
         System.exit(failed == 0 ? 0 : 1);
     }
@@ -575,5 +576,83 @@ public class CoreTests {
         NoSlowCheck ns = new NoSlowCheck(0.12); int nsn = 0; double sp = 0.6;
         for (int i = 0; i < 40; i++) { sp *= 0.91; if (ns.onMove(withUsing(ms(i, 0, 0.0, sp, false), true)) != null) nsn++; }
         check(nsn == 0, "NoSlow: havada (bunny-hop momentumu) yemek yemek meşru");
+    }
+
+    // ================= SPEED / HIGHJUMP / NOSLOW / SCAFFOLD DOĞRULUĞU =================
+    static int motionRun(long seed, int speedLevel, double mul, double add, int ticks) {
+        Sim2D sim = new Sim2D(seed, speedLevel);
+        MotionCheck mc = new MotionCheck(1.12, 0.02);
+        int n = 0;
+        for (int i = 0; i < ticks; i++) {
+            if (i == 200) { sim.cheatMul = mul; sim.cheatAdd = add; }       // hile 200. tikten sonra açılır
+            if (mc.onMove(sim.step(), 50, () -> false) != null) n++;
+        }
+        return n;
+    }
+
+    static void accuracy() {
+        System.out.println("[Speed modeli – meşru çeşitlilik / hile]");
+        int total = 0;
+        for (int lvl = 0; lvl <= 2; lvl++) for (long sd = 1; sd <= 6; sd++) total += motionRun(sd * 31 + lvl, lvl, 1.0, 0.0, 20000);
+        check(total == 0, "rastgele strafe/çapraz/zıplama/sprint/buz/hız efekti, 360 000 tik: 0 kanıt (" + total + ")");
+        int c1 = 0, c2 = 0, c3 = 0;
+        for (long sd = 1; sd <= 4; sd++) { c1 += motionRun(sd, 0, 1.25, 0.0, 600); c2 += motionRun(sd, 0, 1.0, 0.12, 600); c3 += motionRun(sd, 1, 1.12, 0.0, 600); }
+        check(c1 > 0, "Speed 1.25x çarpan hilesi tespit");
+        check(c2 > 0, "Speed +0.12 ivme (bhop/strafe hilesi) tespit");
+        check(c3 > 0, "Speed %12 sinsi hız artışı (hız efektiyle) tespit");
+        // durup kalkma / boşluktan sonra: ilk paket değerlendirilmez
+        MotionCheck mg = new MotionCheck(1.12, 0.02); int gn = 0;
+        for (int i = 0; i < 10; i++) mg.onMove(ms(i, -0.28, 0, 0, true), 50, () -> false);
+        if (mg.onMove(ms(11, 0.13, 0, 0, true), 400, () -> false) != null) gn++;   // 400ms boşluk sonrası ters yönlü kalkış
+        check(gn == 0, "uzun boşluktan sonra ters yönlü kalkış değerlendirilmez");
+
+        System.out.println("[HighJump]");
+        AirCheck ac = new AirCheck(); int hn = 0;
+        for (int i = 0; i < 20; i++) ac.onMove(ms(i, 0, 0, 0.2, true));
+        if (ac.onMove(ms(20, 0, 0.6, 0.2, false)) != null) hn++;               // basamak/slab çıkışı kalkış tiki (probe şaşırırsa)
+        for (int i = 21; i < 60; i++) ac.onMove(ms(i, 0, 0, 0.0, true));
+        check(hn == 0, "kalkış tikinde 0.6 basamak çıkışı HighJump sayılmaz");
+        ac = new AirCheck(); hn = 0;
+        for (int i = 0; i < 20; i++) ac.onMove(ms(i, 0, 0, 0.2, true));
+        for (int i = 20; i < 22; i++) if (ac.onMove(ms(i, 0, i == 20 ? 0.42 : 0.33, 0.2, false)) != null) hn++;
+        check(hn == 0, "normal zıplama HighJump sayılmaz");
+        ac = new AirCheck(); hn = 0;
+        for (int i = 0; i < 20; i++) ac.onMove(ms(i, 0, 0, 0.2, true));
+        double dy = 0.9; if (ac.onMove(ms(20, 0, dy, 0.2, false)) != null) hn++;
+        for (int i = 21; i < 40; i++) { dy = (dy - 0.08) * 0.98; if (ac.onMove(ms(i, 0, dy, 0.2, false)) != null) hn++; }
+        check(hn > 0, "0.9 kalkış hızı (HighJump) tespit");
+        ac = new AirCheck(); hn = 0;
+        for (int i = 0; i < 20; i++) ac.onMove(ms(i, 0, 0, 0.2, true));
+        dy = 0.42; ac.onMove(ms(20, 0, dy, 0.2, false));
+        for (int i = 21; i < 120; i++) {                       // yükselip alçalan zıp-zıp: net yükseklik 1.32'yi aşmamalı
+            dy = (dy - 0.08) * 0.98; if (ac.onMove(ms(i, 0, dy, 0.2, i > 30 && dy < -0.5)) != null) hn++;
+        }
+        check(hn == 0, "net yükseklik: meşru zıplama + düşüş yanlış yükselme sayılmaz");
+
+        System.out.println("[NoSlow]");
+        NoSlowCheck ns = new NoSlowCheck(0.12); int nn = 0;
+        for (int i = 0; i < 40; i++) {
+            MoveSample m = new MoveSample(i, 0, 0, 0.30, 0, 0, true, true, false, false, false, false, false, 1.0, 0, true, 0, 0.6, true, 0.13);
+            if (ns.onMove(m) != null) nn++;
+        }
+        check(nn > 0, "eşya kullanırken sprint + hız (NoSlow) tespit");
+        ns = new NoSlowCheck(0.12); nn = 0;
+        for (int i = 0; i < 80; i++) {
+            MoveSample m = new MoveSample(i, 0, 0, 0.045, 0, 0, true, true, false, false, false, false, false, 1.0, 0, true, 0, 0.6, false, 0.1);
+            if (ns.onMove(m) != null) nn++;
+        }
+        check(nn == 0, "meşru yavaş yürüyerek yemek yemek kanıt üretmiyor");
+
+        System.out.println("[Scaffold geometri]");
+        // A bloğu [0,1]^3. Oyuncu A'nın üstünde, +z kenarında, A'nın +z yan yüzüne tıklıyor (köprü kurma).
+        double fx = 0.5, fy = 0.5, fz = 1.0;
+        double ex = 0.5, ey = 2.62, ez = 1.15;
+        double[] dir = {fx - ex, fy - ey, fz - ez}; double L = Math.sqrt(dir[0]*dir[0] + dir[1]*dir[1] + dir[2]*dir[2]);
+        float yaw = (float) Math.toDegrees(Math.atan2(-dir[0], dir[2])), pitch = (float) -Math.toDegrees(Math.asin(dir[1] / L));
+        check(ScaffoldMath.rayFaceError(ex, ey, ez, yaw, pitch, fx, fy, fz, 0, 0, 1) < 0.05, "tam nişan: hata ~0");
+        check(ScaffoldMath.rayFaceError(ex, ey - 0.35, ez, yaw, pitch, fx, fy, fz, 0, 0, 1) < 0.6,
+                "eğilme geçişinde göz 0.35 oynasa da köprü kurma meşru (hata < 0.6)");
+        check(ScaffoldMath.rayFaceError(ex, ey, ez, 0f, 0f, fx, fy, fz, 0, 0, 1) > 5, "bakmadan yerleştirme (yatay bakış) tespit");
+        check(ScaffoldMath.rayFaceError(ex, ey, ez, 140f, 70f, fx, fy, fz, 0, 0, 1) > 0.9, "tamamen başka yöne bakarak yerleştirme tespit");
     }
 }
