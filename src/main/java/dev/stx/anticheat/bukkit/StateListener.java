@@ -38,12 +38,12 @@ final class StateListener implements Listener {
         d.moveGraceUntilTick = Math.max(d.moveGraceUntilTick, plugin.tick() + plugin.cfg().i(key, def));
     }
 
-    /** Süreli (7 gün) ban: sunucu yeniden başlasa da, isim değişse de UUID ile engeller. */
+    /** Süreli ban (varsayılan 15 gün): sunucu yeniden başlasa da, isim değişse de UUID ile engeller. */
     @EventHandler(priority = EventPriority.HIGH)
     public void onPreLogin(AsyncPlayerPreLoginEvent e) {
         long now = System.currentTimeMillis();
         long until = plugin.ledger().banUntil(e.getUniqueId(), now);
-        if (until > 0) e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, Sanctions.banScreen(until, now));
+        if (until > 0) e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, Sanctions.banScreen(plugin.cfg().s("sanctions.ban-reason", "Hile Kullanımı"), until, now));
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -53,7 +53,11 @@ final class StateListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
-    public void onQuit(PlayerQuitEvent e) { plugin.remove(e.getPlayer().getUniqueId()); plugin.markDirty(); }
+    public void onQuit(PlayerQuitEvent e) {
+        plugin.sanctions().onQuit(e.getPlayer());
+        plugin.remove(e.getPlayer().getUniqueId());
+        plugin.markDirty();
+    }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onTeleport(PlayerTeleportEvent e) {

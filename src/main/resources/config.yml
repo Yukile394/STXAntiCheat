@@ -1,6 +1,6 @@
 # ===================================================================
 #  STXAntiCheat – yapılandırma
-#  Akış: kanıt -> log + (anında kısa engel) -> ihlal (1/3, 2/3) -> 3/3'te süreli ban.
+#  Akış: kanıt -> log + (anında kısa engel) -> doğrulanmış ihlal -> CEZA GÖSTERİSİ (lamalar, "PATLADIN BOM") -> 15 gün ban.
 #  Yanlış pozitif görürseniz: /stx reset <oyuncu> ve ilgili kontrolün weight/eşiğini düşürün
 #  veya checks.<Ad>.enabled: false yapın. Banı tamamen kapatmak için sanctions.ban-enabled: false.
 # ===================================================================
@@ -42,13 +42,25 @@ alerts:
 # ===== Kademeli müdahale =====
 # Her kontrol bağımsız puan toplar. Puan "confirm-points" üstüne çıkarsa bir İHLAL sayılır (en fazla dakikada bir,
 # kalıcı ve UUID bazlı). Düşük puan = yalnızca kayıt.
-#   1. ihlal -> geçici müdahale (örn. 15 sn saldırı/hareket engeli)      (1/3)
-#   2. ihlal -> daha uzun kısıtlama                                      (2/3)
-#   3. ihlal -> BAN, ama yalnızca: ban-uygun hile + HIGH kanıt + en az N bağımsız hile türü + ban kilidi açık (3/3)
+#   Ban-uygun (ban-eligible: true) hilelerde ihlal sayılır sayılmaz -> ceza gösterisi + ban (sanctions.show).
+#   ESKİ "15 saniye engellendi / kısıtlandı" mesajları kaldırıldı.
+#   Ban-uygun olmayan hilelerde (AutoClicker, Criticals, ChestStealer...) yalnızca mesajsız geçici engel uygulanır.
 sanctions:
   mitigation-enabled: true       # geçici, kendiliğinden biten müdahaleler
-  ban-enabled: true              # 3/3'te süreli ban (kapatmak için false)
-  ban-duration-days: 7           # ban süresi (gün). UUID bazlı, sunucu yeniden başlasa da sürer.
+  ban-enabled: true              # süreli ban + ceza gösterisi (kapatmak için false)
+  ban-duration-days: 15          # ban süresi (gün). UUID bazlı, sunucu yeniden başlasa da sürer.
+  ban-reason: "Hile Kullanımı"   # atılma ekranında ve giriş engelinde görünen sebep
+  # Ceza gösterisi: oyuncu havaya kalkıp OTURUR, etrafında lamalar mevlana gibi döner ve tükürür, ekranda başlık çıkar,
+  # sonra ban. Ban sonrası: lamalar yavrulaşıp banlandığı noktaya akar, yeşile döner, orada creeper doğar/döner,
+  # saydamlaşıp kaybolur ve TNT sesi gelir. Gösteri hasar vermez; varlıklar kalıcı değildir.
+  show:
+    enabled: true                # false: gösterisiz doğrudan ban
+    title: "&c&lPATLADIN BOM"    # ekrandaki büyük yazı (& renk kodları)
+    subtitle: "&cHileyle oynarsan patlatırlar."   # alttaki yazı
+    llamas: 8                    # halkadaki lama sayısı (3-16)
+    radius: 2.5                  # halka yarıçapı (blok)
+    rise-height: 3.0             # havaya kalkma yüksekliği (tavan varsa otomatik kısalır)
+    spin-seconds: 5              # banlanmadan önce dönme süresi
   min-distinct-checks-for-ban: 1 # ban için kaç farklı hile türünde ihlal gerekir (1 = tek hile türü yeter)
   save-interval-seconds: 300
   # Log düştüğü ANDA devreye giren kısa engeller (ihlal sayacından bağımsız):
@@ -104,6 +116,8 @@ checks:
     multi-ticks: 5
     flick-degrees: 60
     wall-check: true             # HER vuruşta duvar kontrolü; kapalıysa vuruş anında iptal edilir
+    wall-expand: 0.10            # hitbox'a eklenen pay (blok): kenardan azıcık görünen hitbox'a vuruş meşru sayılır
+    wall-eye-tolerance: 0.35     # göz yüksekliği payı (blok): eğilme<->ayakta farkı, zıplama başlangıcı
     angle-cancel-degrees: 70     # bakış hedeften bu kadar saparsa vuruş anında iptal
     tracking-window: 60          # açık alan: strafe eden oyuncu hedefte kros-hair kalıcılığı (tik)
     tracking-min-on-target: 0.985

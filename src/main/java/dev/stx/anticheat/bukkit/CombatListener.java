@@ -1,16 +1,19 @@
 package dev.stx.anticheat.bukkit;
 
 import dev.stx.anticheat.core.AimCheck;
+import dev.stx.anticheat.core.Geometry;
 import dev.stx.anticheat.core.Geometry.Box;
 import dev.stx.anticheat.core.ReachCheck;
 import dev.stx.anticheat.core.ScaffoldMath;
 import dev.stx.anticheat.core.Result;
+import dev.stx.anticheat.core.WallVision;
 import io.papermc.paper.event.player.PrePlayerAttackEntityEvent;
 import java.util.ArrayList;
 import java.util.List;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -22,7 +25,6 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
 final class CombatListener implements Listener {
@@ -121,7 +123,7 @@ final class CombatListener implements Listener {
         List<Box> boxes = boxesFor(target, p, nowMs);
 
         // 1) DUVAR ARKASI: her vuruşta, hedefin TÜM ping-geçmişi konumları için ışın atılır. Hepsi kapalıysa iptal.
-        if (geo && cfg.enabled("Aura") && cfg.cb("Aura", "wall-check", true) && behindWall(p, eye, boxes)) {
+        if (geo && cfg.enabled("Aura") && cfg.cb("Aura", "wall-check", true) && behindWall(p, d, eye, boxes, nowMs)) {
             plugin.flagger().flag(p, d, "Aura", Result.of(2.0, "Aura duvar: hedef bloğun arkasında, vuruş iptal edildi"));
             if (cancelOk) { e.setCancelled(true); return; }
         }
@@ -197,34 +199,55 @@ final class CombatListener implements Listener {
         return list;
     }
 
-    /** Göz -> hedef arasında blok var mı? Konumların HEPSİNDE ve 5 noktanın HEPSİNDE kapalıysa duvar arkasıdır. */
-    private boolean behindWall(Player p, Location eye, List<Box> boxes) {
-        int n = boxes.size();
-        int[] idx = n <= 4 ? null : new int[]{0, n / 3, (2 * n) / 3, n - 1};
-        int count = idx == null ? n : idx.length;
-        for (int k = 0; k < count; k++) {
-            Box b = boxes.get(idx == null ? k : idx[k]);
-            if (visible(p, eye, b)) return false;
+    /**
+     * Duvar arkası mı? YALNIZCA hedefe giden hiçbir görüş hattı yoksa (core.WallVision): gerçek bakış ışını, hitbox'ın
+     * köşeleri/başı/gövdesi, hedefin tüm ping-geçmişi konumları ve oyuncunun birkaç tik önceki / eğilme-ayakta farklı
+     * göz konumları denenir. Hitbox'ı duvarın kenarından veya üstünden azıcık görünen hedefe vuruş meşrudur.
+     */
+    private boolean behindWall(Player p, PlayerData d, Location eye, List<Box> boxes, long nowMs) {
+        STXConfig cfg = plugin.cfg();
+        double tol = cfg.cd("Aura", "wall-eye-tolerance", 0.35);
+        double expand = cfg.cd("Aura", "wall-expand", 0.10);
+
+        List<double[]> eyes = new ArrayList<>(6);
+        eyes.add(new double[]{eye.getX(), eye.getY(), eye.getZ()});
+        if (tol > 0) eyes.add(new double[]{eye.getX(), eye.getY() + tol, eye.getZ()});       // eğilme <-> ayakta göz farkı
+
+        // Oyuncunun son birkaç tikteki (ping kadar eski) göz konumları: hareket ederken köşeden bakıp vurma
+        double off = eye.getY() - p.getLocation().getY();
+        List<double[]> past = new ArrayList<>(8);
+        d.collectPositions(nowMs - Math.min(300L, p.getPing() / 2 + 120L), past);
+        int extra = 0;
+        for (double[] pos : past) {
+            double ex = pos[0], ey = pos[1] + off, ez = pos[2];
+            boolean dup = false;
+            for (double[] k : eyes) if (Math.abs(k[0] - ex) + Math.abs(k[1] - ey) + Math.abs(k[2] - ez) < 0.05) { dup = true; break; }
+            if (dup) continue;
+            eyes.add(new double[]{ex, ey, ez});
+            if (++extra >= 3) break;
         }
-        return true;
+
+        double[] look = Geometry.look(eye.getYaw(), eye.getPitch());
+        double range = Probe.entityReach(p) + 1.5;
+        return !WallVision.clearView(new BlockRay(p.getWorld()), eyes, look, boxes, expand, range, 1500);
     }
 
-    private boolean visible(Player p, Location eye, Box b) {
-        double cx = (b.minX() + b.maxX()) / 2, cz = (b.minZ() + b.maxZ()) / 2, h = b.maxY() - b.minY();
-        double dxs = cx - eye.getX(), dzs = cz - eye.getZ(), len = Math.hypot(dxs, dzs);
-        double px = len > 1e-6 ? -dzs / len * 0.3 : 0.3, pz = len > 1e-6 ? dxs / len * 0.3 : 0;   // yan noktalar
-        double[][] pts = {
-                {cx, b.minY() + h * 0.5, cz}, {cx, b.minY() + h * 0.9, cz}, {cx, b.minY() + h * 0.15, cz},
-                {cx + px, b.minY() + h * 0.5, cz + pz}, {cx - px, b.minY() + h * 0.5, cz - pz}};
-        for (double[] pt : pts) {
-            Vector dir = new Vector(pt[0] - eye.getX(), pt[1] - eye.getY(), pt[2] - eye.getZ());
-            double dist = dir.length();
-            if (dist < 0.8) return true;
-            dir.normalize();
-            RayTraceResult rr = p.getWorld().rayTraceBlocks(eye, dir, dist - 0.1, FluidCollisionMode.NEVER, true);
-            if (rr == null) return true;
+    /** WallVision için Bukkit blok ışını. Hem çarpışma hem dış hat (outline) kapalıysa engel sayılır: çit/duvar gibi
+     *  çarpışması 1.5 olup görsel hattı 1.0 olan bloklarda istemcinin yaptığı seçim (outline) esas alınır. */
+    private static final class BlockRay implements WallVision.Blocker {
+        private final World world;
+        BlockRay(World world) { this.world = world; }
+
+        @Override
+        public boolean blocked(double ox, double oy, double oz, double tx, double ty, double tz) {
+            double dx = tx - ox, dy = ty - oy, dz = tz - oz, dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            double len = dist - 0.1;
+            if (len <= 0) return false;
+            Vector dir = new Vector(dx / dist, dy / dist, dz / dist);
+            Location o = new Location(world, ox, oy, oz);
+            if (world.rayTraceBlocks(o, dir, len, FluidCollisionMode.NEVER, true) == null) return false;     // çarpışma hattı temiz
+            return world.rayTraceBlocks(o, dir, len, FluidCollisionMode.NEVER, false) != null;               // dış hat da kapalı
         }
-        return false;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)

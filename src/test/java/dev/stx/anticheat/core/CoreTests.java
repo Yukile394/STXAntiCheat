@@ -46,6 +46,7 @@ public class CoreTests {
         policy();
         newChecks();
         accuracy();
+        wallVision();
         System.out.println("\n== " + passed + " geçti, " + failed + " başarısız ==");
         System.exit(failed == 0 ? 0 : 1);
     }
@@ -654,5 +655,110 @@ public class CoreTests {
                 "eğilme geçişinde göz 0.35 oynasa da köprü kurma meşru (hata < 0.6)");
         check(ScaffoldMath.rayFaceError(ex, ey, ez, 0f, 0f, fx, fy, fz, 0, 0, 1) > 5, "bakmadan yerleştirme (yatay bakış) tespit");
         check(ScaffoldMath.rayFaceError(ex, ey, ez, 140f, 70f, fx, fy, fz, 0, 0, 1) > 0.9, "tamamen başka yöne bakarak yerleştirme tespit");
+    }
+
+    // ================= DUVAR ARKASI (görüş hattı) =================
+    interface Solid { boolean at(double x, double y, double z); }
+
+    /** Test dünyası: doğru parçası boyunca 1 cm adımla blok var mı bakar (hedef noktadan 0.1 önce biter). */
+    static WallVision.Blocker blocker(Solid s) {
+        return (ox, oy, oz, tx, ty, tz) -> {
+            double dx = tx - ox, dy = ty - oy, dz = tz - oz, len = Math.sqrt(dx * dx + dy * dy + dz * dz), end = len - 0.1;
+            for (double t = 0; t < end; t += 0.01)
+                if (s.at(ox + dx / len * t, oy + dy / len * t, oz + dz / len * t)) return true;
+            return false;
+        };
+    }
+
+    static double[] lookAt(double[] e, double tx, double ty, double tz) {
+        double dx = tx - e[0], dy = ty - e[1], dz = tz - e[2], l = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        return new double[]{dx / l, dy / l, dz / l};
+    }
+
+    /** ESKİ algoritma (düzeltmeden önceki): yalnızca 5 nokta, geçmişten en çok 4 kutu. Karşılaştırma için. */
+    static boolean oldBehindWall(WallVision.Blocker bl, double[] eye, List<Box> boxes) {
+        int n = boxes.size();
+        int[] idx = n <= 4 ? null : new int[]{0, n / 3, (2 * n) / 3, n - 1};
+        int count = idx == null ? n : idx.length;
+        for (int k = 0; k < count; k++) {
+            Box b = boxes.get(idx == null ? k : idx[k]);
+            double cx = (b.minX() + b.maxX()) / 2, cz = (b.minZ() + b.maxZ()) / 2, h = b.maxY() - b.minY();
+            double dxs = cx - eye[0], dzs = cz - eye[2], len = Math.hypot(dxs, dzs);
+            double px = len > 1e-6 ? -dzs / len * 0.3 : 0.3, pz = len > 1e-6 ? dxs / len * 0.3 : 0;
+            double[][] pts = {{cx, b.minY() + h * 0.5, cz}, {cx, b.minY() + h * 0.9, cz}, {cx, b.minY() + h * 0.15, cz},
+                    {cx + px, b.minY() + h * 0.5, cz + pz}, {cx - px, b.minY() + h * 0.5, cz - pz}};
+            boolean vis = false;
+            for (double[] pt : pts) {
+                double dx = pt[0] - eye[0], dy = pt[1] - eye[1], dz = pt[2] - eye[2], dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                if (dist < 0.8 || !bl.blocked(eye[0], eye[1], eye[2], pt[0], pt[1], pt[2])) { vis = true; break; }
+            }
+            if (vis) return false;
+        }
+        return true;
+    }
+
+    static boolean clear(WallVision.Blocker bl, List<double[]> eyes, List<Box> boxes) {
+        double[] look = lookAt(eyes.get(0), (boxes.get(0).minX() + boxes.get(0).maxX()) / 2,
+                (boxes.get(0).minY() + boxes.get(0).maxY()) / 2, (boxes.get(0).minZ() + boxes.get(0).maxZ()) / 2);
+        return WallVision.clearView(bl, eyes, look, boxes, 0.10, 6.0, 1500);
+    }
+
+    static void wallVision() {
+        System.out.println("[Duvar arkası – görüş hattı]");
+        double[] eye = {0, 1.62, 0};
+        List<double[]> eyes = List.of(eye);
+
+        // Tam kapalı: 3 blok yüksek, geniş duvar (x 3..4). Hedef x=6.
+        WallVision.Blocker full = blocker((x, y, z) -> x >= 3 && x <= 4 && y < 3.0);
+        List<Box> tgt = List.of(Box.ofEntity(6, 0, 0, 0.6, 1.8));
+        check(!clear(full, eyes, tgt), "duvar arkasındaki hedef: görüş YOK (gerçek duvar vuruşu yakalanır)");
+
+        // Üstü açık ama duvar yüksek (2 blok): zıplamadan göremez -> hâlâ duvar arkası
+        WallVision.Blocker tall = blocker((x, y, z) -> x >= 3 && x <= 4 && y < 2.0);
+        check(!clear(tall, eyes, tgt), "2 blok duvar, üstü açık ama zıplamadan görünmüyor: duvar arkası");
+
+        // Kafa duvarın üstünden görünüyor (duvar 1.70, hedef hemen arkada, kafa 1.80): eski kod 0.9h=1.62'de kalıp kaçırıyordu
+        WallVision.Blocker low = blocker((x, y, z) -> x >= 3 && x <= 4 && y < 1.70);
+        List<Box> close = List.of(Box.ofEntity(4.5, 0, 0, 0.6, 1.8));
+        check(oldBehindWall(low, eye, close), "[eski kod] başı duvarın üstünden görünen hedefe 'duvar arkası' diyordu (yanlış pozitif)");
+        check(clear(low, eyes, close), "başı duvarın üstünden görünen hedef: görüş VAR (düzeltildi)");
+
+        // Alçak duvar: gövde üstü görünüyor
+        WallVision.Blocker half = blocker((x, y, z) -> x >= 3 && x <= 4 && y < 1.0);
+        check(clear(half, eyes, tgt), "1 blok duvar: üst gövde görünüyor, vuruş meşru");
+
+        // Köşe: duvar z<=0 yarım düzlem. Göz z=0.5. Merkez hat kapalı, hitbox köşesi kenardan görünüyor.
+        WallVision.Blocker edge = blocker((x, y, z) -> x >= 3 && x <= 4 && z <= 0 && y < 3.0);
+        List<double[]> eyeE = List.of(new double[]{0, 1.62, 0.5});
+        List<Box> peek = List.of(Box.ofEntity(6, 0, -0.5, 0.6, 1.8));
+        check(edge.blocked(0, 1.62, 0.5, 6, 0.9 + 0.0, -0.5), "köşe senaryosu: hedef MERKEZİNE giden hat gerçekten kapalı");
+        check(clear(edge, eyeE, peek), "hitbox'ı duvarın kenarından azıcık görünen hedef: vuruş meşru");
+        List<Box> hidden = List.of(Box.ofEntity(6, 0, -1.2, 0.6, 1.8));
+        check(!clear(edge, eyeE, hidden), "hitbox'ı tamamen duvar arkasında kalan hedef: görüş YOK");
+
+        // Hedef hareket ediyor: 7 geçmiş konumdan yalnızca ortadaki (idx 3) görünüyor. Eski kod 0,2,4,6'ya bakıp kaçırıyordu.
+        List<Box> hist = new ArrayList<>();
+        for (int i = 0; i < 7; i++) hist.add(Box.ofEntity(6, 0, -3.0 + (i == 3 ? 3.4 : 0) + i * 0.0, 0.6, 1.8));
+        WallVision.Blocker half2 = blocker((x, y, z) -> x >= 3 && x <= 4 && z <= 0.2 && y < 3.0);
+        List<double[]> e0 = List.of(new double[]{0, 1.62, 1.0});
+        check(oldBehindWall(half2, e0.get(0), hist), "[eski kod] geçmiş konumlardan yalnızca biri görünürken 'duvar arkası' diyordu");
+        check(clear(half2, e0, hist), "ping-geçmişi konumlarının HEPSİ taranıyor: biri görünüyorsa vuruş meşru");
+
+        // Eğilme/ayakta farkı: sunucu gözü 1.27 (eğilmiş), istemci 1.62. Duvar 1.6.
+        WallVision.Blocker w16 = blocker((x, y, z) -> x >= 3 && x <= 4 && y < 1.6);
+        double[] sneakEye = {0, 1.27, 0};
+        check(!clear(w16, List.of(sneakEye), tgt), "yalnızca eğilmiş göz: duvar 1.6 hedefi kapatıyor");
+        check(clear(w16, List.of(sneakEye, new double[]{0, 1.27 + 0.35, 0}), tgt), "göz +0.35 toleransı: eğilme/ayakta farkında vuruş meşru");
+
+        // Duvar yok
+        WallVision.Blocker none = blocker((x, y, z) -> false);
+        check(clear(none, eyes, tgt), "engel yok: görüş var");
+
+        // Çok yakın (duvara yaslanmış): görünür sayılır
+        List<Box> adj = List.of(Box.ofEntity(0.9, 0, 0, 0.6, 1.8));
+        check(clear(blocker((x, y, z) -> true), eyes, adj), "0.8 bloktan yakın hedef her zaman görünür");
+
+        // Bütçe: tükenirse şüpheden sanık yararlanır
+        check(WallVision.clearView(full, eyes, lookAt(eye, 6, 0.9, 0), tgt, 0.10, 6.0, 3), "ışın bütçesi bitince vuruş cezalandırılmaz");
     }
 }

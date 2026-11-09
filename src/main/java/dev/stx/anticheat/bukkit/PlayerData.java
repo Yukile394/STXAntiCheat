@@ -149,6 +149,15 @@ public final class PlayerData {
         }
     }
 
+    /** sinceMs'den bu yana kaydedilen AYAK konumlarını ({x,y,z}, yeniden eskiye) ekler. Duvar kontrolünde oyuncunun kendi geçmiş göz konumları için. */
+    public void collectPositions(long sinceMs, List<double[]> out) {
+        for (int k = 0; k < hCount; k++) {
+            int idx = (hHead - 1 - k + HIST) % HIST;
+            if (hT[idx] < sinceMs) break;
+            out.add(new double[]{hX[idx], hY[idx], hZ[idx]});
+        }
+    }
+
     /** Teleport/dünya değişimi sonrası referansları sıfırla. */
     public void resetMotionState() {
         hasLast = false;

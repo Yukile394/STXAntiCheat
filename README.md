@@ -29,15 +29,20 @@ Windows'tan yüklerseniz `gradlew` çalıştırma biti kaybolabilir; workflow `c
 
 **2) Kalıcı ihlal (UUID bazlı, `data/violations.dat`):** puan `confirm-points`'i aşarsa ihlal sayılır (aynı hile için en fazla 30 sn'de bir):
 
-| İhlal | Müdahale | Mesaj |
-|---|---|---|
-| 1 | 15 sn hileye özel engel | `§e§lAntiCheat §8» §eŞüpheli hareketlerin algılandı! 15 saniye boyunca saldırıların engellendi. §7(1/3)` |
-| 2 | 30 sn kısıtlama | `§e§lAntiCheat §8» §6Hile şüphesi devam ediyor! Hareketlerin kısıtlandı. §7(2/3)` |
-| 3 | **7 gün BAN** (ban-uygun hile + güçlü kanıt) | `§c§lAntiCheat §8» §cBirden fazla hile ihlali tespit edildi. Sunucudan yasaklandın. §7(3/3)` |
+Ban-uygun hilelerde ihlal sayılır sayılmaz (eski "15 sn engellendi / kısıtlandı" mesajları kaldırıldı) **ceza gösterisi + 15 gün ban** gelir:
+
+1. Oyuncu havaya kalkar ve **oturma pozuna** geçer; etrafında lamalar mevlana gibi döner ve ona tükürür; ekranda
+   **PATLADIN BOM** / *Hileyle oynarsan patlatırlar.* yazısı çıkar.
+2. Süre dolunca oyuncu atılır: **15 gün ban, sebep: Hile Kullanımı** (`sanctions.ban-duration-days`, `sanctions.ban-reason`).
+3. Ban sonrası (sunucudakiler görür): lamalar yavrulaşıp banlandığı noktaya akar, renk değiştirip yeşile döner; yeşil olunca tam o
+   noktada creeper doğar ve döner, sonra saydamlaşıp kaybolur ve TNT sesi gelir.
+
+Gösteri hasar vermez, varlıkları kalıcı değildir ve `sanctions.show.*` ile ayarlanır (`enabled: false` = gösterisiz doğrudan ban).
+Ban kaydı gösteri **başlarken** yazılır: gösteri sırasında çıkan oyuncu da banlıdır.
 
 Ban eklentinin kendi UUID tabanlı listesindedir (sunucu ban listesine bağımlı değil, sürümden bağımsız): oyuncu giriş yapamaz,
 kalan süre gösterilir, sunucu yeniden başlasa da sürer. Kaldırmak için `/stx unban <oyuncu>`. Süre ve açma/kapama: `sanctions.ban-*`.
-AutoClicker, Criticals, ChestStealer, GuiMove, Velocity, Rotation, AimAssist **ban-uygun değildir** (en fazla geçici kısıt).
+AutoClicker, Criticals, ChestStealer, GuiMove, Velocity, Rotation, AimAssist **ban-uygun değildir** (en fazla mesajsız geçici kısıt).
 
 Çıkıp girme: girişte kontroller sıfırdan kurulur, ihlaller ve bitmemiş kısıtlar defterden geri yüklenir. Dünya değişimi,
 respawn, teleport ve kendi geri-ışınlamamız için ayrı kısa tolerans vardır. Defter periyodik (asenkron, atomik) ve kapanışta kaydedilir.
@@ -82,7 +87,7 @@ yanlış pozitif vermez (testle doğrulandı). NoSlow yalnızca yerde değerlend
   (`checks.ElytraSpeed/ElytraTarget` altında ayarlanır.)
 
 ## Aura / saldırı tespiti
-Her vuruşta: (1) hedefin ping geçmişindeki **tüm** konumlarına 5 noktalı duvar ışını, (2) bakış–hedef açısı, (3) Reach, (4) bakış ışını–hitbox,
+Her vuruşta: (1) duvar kontrolü (`core/WallVision`): hedefe giden **en az bir** temiz görüş hattı varsa vuruş meşrudur; gerçek bakış ışını, hitbox köşeleri/başı/gövdesi, hedefin **tüm** ping-geçmişi konumları ve oyuncunun eğilme/ayakta ve birkaç tik önceki göz konumları denenir (hitbox'ı duvarın kenarından/üstünden azıcık görünen hedefe vuruş cezalandırılmaz), (2) bakış–hedef açısı, (3) Reach, (4) bakış ışını–hitbox,
 (5) AimAssist (nişanın hedef merkezine fazla kilitli/tutarlı olması), (6) çoklu hedef, keskin dönüş ve **sessiz rotasyon** (dön–vur–geri dön).
 **Açık alan:** (7) strafe eden oyuncu hedefte kros-hair'in hitbox üzerinde kalma oranı (Aura Track ~%100, insan çok daha düşük;
 düz kovalamada sayılmaz), (8) **rotasyon şekli**: tek tikte büyük izole snap (insan dönüşü rampalıdır). Bu ikisi Aura'nın GCD

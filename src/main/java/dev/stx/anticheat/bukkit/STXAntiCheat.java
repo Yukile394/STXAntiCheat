@@ -55,6 +55,8 @@ public final class STXAntiCheat extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new MovementListener(this), this);
         Bukkit.getPluginManager().registerEvents(new CombatListener(this), this);
         Bukkit.getPluginManager().registerEvents(new InventoryListener(this), this);
+        Bukkit.getPluginManager().registerEvents(new ShowListener(this), this);
+        PunishShow.cleanupTeams();                                  // önceki çalışmadan kalan gösteri takımları
 
         PluginCommand cmd = getCommand("stx");
         if (cmd != null) {
@@ -71,11 +73,12 @@ public final class STXAntiCheat extends JavaPlugin {
         for (Player p : Bukkit.getOnlinePlayers()) reinit(p);    // /reload veya geç yükleme
         if (!disabledChecks.isEmpty()) getLogger().warning("Oyun içinden KAPATILMIŞ kontroller: " + disabledChecks.keySet() + " (/stx geriac ile açın)");
         getLogger().info("STXAntiCheat etkin. Geçici müdahale: " + (cfg.b("sanctions.mitigation-enabled", true) ? "AÇIK" : "KAPALI")
-                + " | Ban: " + (cfg.banActive() ? "AÇIK (" + cfg.d("sanctions.ban-duration-days", 7) + " gün)" : "KAPALI"));
+                + " | Ban: " + (cfg.banActive() ? "AÇIK (" + cfg.d("sanctions.ban-duration-days", 15) + " gün)" : "KAPALI"));
     }
 
     @Override
     public void onDisable() {
+        if (sanctions != null) sanctions.shutdown();               // açık ceza gösterilerini temizle (ban zaten defterde)
         saveLedger(true);
         if (vlog != null) {
             if (vlog.dropped() > 0) getLogger().warning(vlog.dropped() + " log kaydı kuyruk dolduğu için düşürüldü.");

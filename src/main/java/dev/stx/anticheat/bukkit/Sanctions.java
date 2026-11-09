@@ -9,70 +9,86 @@ import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
-/** Doğrulanmış ihlallerde hile türüne özel geçici müdahale, oyuncu mesajı ve (kilitli) ban. */
+/** Doğrulanmış ihlallerde hile türüne özel geçici müdahale ve ban (ceza gösterisi: PunishShow). */
 final class Sanctions {
     private static final LegacyComponentSerializer SEC = LegacyComponentSerializer.legacySection();
     private final STXAntiCheat plugin;
 
     Sanctions(STXAntiCheat plugin) { this.plugin = plugin; }
 
-    private static String noun(String type) {
-        return switch (type) {
-            case "ATTACK" -> "saldırıların";
-            case "MOVE" -> "hareketlerin";
-            case "PLACE" -> "blok yerleştirmelerin";
-            case "CONTAINER" -> "konteyner işlemlerin";
-            case "ELYTRA" -> "elytra kullanımın";
-            default -> "işlemlerin";
-        };
+    private final java.util.Map<java.util.UUID, PunishShow> shows = new java.util.HashMap<>();
+
+    boolean showing(java.util.UUID id) { return shows.containsKey(id); }
+    void showEnded(java.util.UUID id) { shows.remove(id); }
+
+    /** Oyuncu çıktı: gösteri sürüyorsa final (creeper/TNT) yine oynar; ban zaten defterdedir. */
+    void onQuit(Player p) {
+        PunishShow s = shows.get(p.getUniqueId());
+        if (s != null) s.onQuit();
     }
 
-    private static String cap(String s) { return Character.toUpperCase(s.charAt(0)) + s.substring(1); }
+    /** Eklenti kapanırken: açık gösterileri temizle (varlık kalmasın). */
+    void shutdown() {
+        for (PunishShow s : new java.util.ArrayList<>(shows.values())) s.finish();
+        shows.clear();
+        PunishShow.cleanupTeams();
+    }
 
-    private void tell(Player p, String legacy) { p.sendMessage(SEC.deserialize(legacy)); }
-
+    /**
+     * Kademeli müdahale kararı uygulanır. ESKİ "şüpheli hareketlerin algılandı / 15 saniye engellendi / kısıtlandı" mesajları
+     * KALDIRILDI. O anın yerine, ban-uygun hilelerde doğrudan ceza gösterisi + ban gelir (config: sanctions.show).
+     * Ban-uygun olmayan hilelerde (AutoClicker, Criticals...) yalnızca mesajsız geçici engel uygulanır.
+     */
     void execute(Player p, PlayerData d, String check, SanctionPolicy.Stage st, int n,
                  SanctionPolicy.Rule rule, long nowWall) {
+        if (st == SanctionPolicy.Stage.LOG) return;
+        if (shows.containsKey(p.getUniqueId())) return;                 // zaten cezalandırılıyor
         STXConfig c = plugin.cfg();
         java.util.List<String> types = c.mitigationTypes(check);
         String type = types.isEmpty() ? "NONE" : types.get(0);
         boolean canMitigate = c.b("sanctions.mitigation-enabled", true) && !type.equals("NONE");
-        String counter = rule.banEligible()
-                ? "§7(" + Math.min(n, rule.violationsToBan()) + "/" + rule.violationsToBan() + ")"
-                : "§7(" + n + ")";
-        switch (st) {
-            case LOG -> { }
-            case WARN_MITIGATE -> {
-                if (!canMitigate) return;
-                startAll(p, d, types, rule.mitigationSeconds(), nowWall);
-                tell(p, "§e§lAntiCheat §8» §eŞüpheli hareketlerin algılandı! " + rule.mitigationSeconds()
-                        + " saniye boyunca " + noun(type) + " engellendi. " + counter);
-            }
-            case RESTRICT -> {
-                if (!canMitigate) return;
-                startAll(p, d, types, rule.restrictSeconds(), nowWall);
-                tell(p, "§e§lAntiCheat §8» §6Hile şüphesi devam ediyor! " + cap(noun(type)) + " kısıtlandı. " + counter);
-            }
-            case BAN -> {
-                if (c.banActive()) {
-                    long until = nowWall + (long) (c.d("sanctions.ban-duration-days", 7) * 86_400_000L);
-                    plugin.ledger().setBan(p.getUniqueId(), p.getName(), until, check);
-                    plugin.saveLedger(false);
-                    plugin.flagger().recordEvent("BAN", p, d, check, "n=" + n + " until=" + until, nowWall);
-                    d.suspicion.clear();
-                    String counter3 = "§7(" + rule.violationsToBan() + "/" + rule.violationsToBan() + ")";
-                    p.kick(SEC.deserialize("§c§lAntiCheat §8» §cBirden fazla hile ihlali tespit edildi. Sunucudan yasaklandın. "
-                            + counter3 + "\n" + remaining(until, nowWall)));
-                } else {
-                    plugin.flagger().recordEvent("WOULD_BAN", p, d, check, "n=" + n, nowWall);
-                    if (canMitigate) {
-                        startAll(p, d, types, rule.restrictSeconds(), nowWall);
-                        tell(p, "§e§lAntiCheat §8» §6Hile şüphesi devam ediyor! " + cap(noun(type)) + " kısıtlandı. " + counter);
-                    }
-                    notifyWouldBan(p, d, check, n, nowWall);
-                }
-            }
+        boolean banOn = c.banActive();
+
+        if (rule.banEligible() && banOn) {
+            if (c.b("sanctions.show.enabled", true)) { startShow(p, d, check, n, nowWall); return; }
+            if (st == SanctionPolicy.Stage.BAN) { banNow(p, d, check, n, nowWall); return; }
         }
+
+        // Ban yok / ban-uygun değil: mesajsız geçici engel
+        if (st == SanctionPolicy.Stage.BAN) {
+            plugin.flagger().recordEvent("WOULD_BAN", p, d, check, "n=" + n, nowWall);
+            notifyWouldBan(p, d, check, n, nowWall);
+        }
+        if (canMitigate) startAll(p, d, types, st == SanctionPolicy.Stage.WARN_MITIGATE ? rule.mitigationSeconds() : rule.restrictSeconds(), nowWall);
+    }
+
+    private long banUntil(long nowWall) {
+        return nowWall + (long) (plugin.cfg().d("sanctions.ban-duration-days", 15) * 86_400_000L);
+    }
+
+    /** Ban defterde (UUID bazlı) kaydedilir; oyuncu hâlâ çevrimiçi olsa da çıkıp girerek kaçamaz. */
+    private long recordBan(Player p, PlayerData d, String check, int n, long nowWall, String how) {
+        long until = banUntil(nowWall);
+        plugin.ledger().setBan(p.getUniqueId(), p.getName(), until, check);
+        plugin.saveLedger(false);
+        plugin.flagger().recordEvent("BAN", p, d, check, "n=" + n + " until=" + until + " " + how, nowWall);
+        d.suspicion.clear();
+        return until;
+    }
+
+    /** Gösteri: ban hemen yazılır, oyuncu havaya kalkıp lamalarla döner, sonra atılır. */
+    private void startShow(Player p, PlayerData d, String check, int n, long nowWall) {
+        long until = recordBan(p, d, check, n, nowWall, "show");
+        PunishShow s = new PunishShow(plugin, this, p, d, plugin.cfg().s("sanctions.ban-reason", "Hile Kullanımı"), until);
+        shows.put(p.getUniqueId(), s);
+        // Olay işlenirken değil, bir sonraki tikte başlat (hareket/vuruş olayının ortasında bindirme yapma)
+        Bukkit.getScheduler().runTask(plugin, s::start);
+    }
+
+    /** Gösterisiz ban (sanctions.show.enabled: false). */
+    private void banNow(Player p, PlayerData d, String check, int n, long nowWall) {
+        long until = recordBan(p, d, check, n, nowWall, "direct");
+        p.kick(SEC.deserialize(banScreen(plugin.cfg().s("sanctions.ban-reason", "Hile Kullanımı"), until, nowWall)));
     }
 
     /** Giriş engeli ve kick mesajı için kalan süre. */
@@ -81,8 +97,8 @@ final class Sanctions {
         return "§7Kalan süre: §f" + (m / 1440) + " gün " + ((m % 1440) / 60) + " saat " + (m % 60) + " dk";
     }
 
-    static String banScreen(long untilMs, long nowMs) {
-        return "§c§lAntiCheat §8» §cHile kullanımı nedeniyle sunucudan yasaklandın.\n" + remaining(untilMs, nowMs);
+    static String banScreen(String reason, long untilMs, long nowMs) {
+        return "§c§lAntiCheat §8» §cSunucudan yasaklandın.\n§7Sebep: §f" + reason + "\n" + remaining(untilMs, nowMs);
     }
 
     private void notifyWouldBan(Player p, PlayerData d, String check, int n, long now) {
